@@ -112,6 +112,9 @@ def extract_transaction_from_pdf(pdf_file):
 # Parser Trade Republic (CTO)
 # ─────────────────────────────────────────────
 def extract_transaction_from_traderepublic(pdf_file):
+    """
+    Parse les confirmations d'investissement programmé Trade Republic.
+    """
     try:
         with pdfplumber.open(pdf_file) as pdf:
             text = pdf.pages[0].extract_text() or ""
@@ -121,67 +124,92 @@ def extract_transaction_from_traderepublic(pdf_file):
     if "TRADE REPUBLIC" not in text.upper() and "CONFIRMATION DE L'INVESTISSEMENT" not in text.upper():
         return None
 
-    def search(pattern, group=1):
-        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        return m.group(group) if m else None
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    # Date
-    date_str = search(r"(?:Exécution de l'investissement programmé le|DATE)\s+(\d{2}[./]\d{2}[./]\d{4})")
-    if not date_str:
-        date_str = search(r"DATE\s+(\d{2}\.\d{2}\.\d{4})")
-    if not date_str:
+    # --- Date ---
+    date = None
+    for line in lines:
+        # "Exécution de l'investissement programmé le 02/10/2025"
+        m = re.search(r"le\s+(\d{2}/\d{2}/\d{4})", line)
+        if m:
+            try:
+                date = datetime.strptime(m.group(1), "%d/%m/%Y")
+                break
+            except ValueError:
+                pass
+        # "DATE 02.10.2025"
+        m = re.search(r"DATE\s+(\d{2})\.(\d{2})\.(\d{4})", line, re.IGNORECASE)
+        if m:
+            try:
+                date = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                break
+            except ValueError:
+                pass
+    if date is None:
         return None
-    date_str = date_str.replace(".", "/")
-    try:
-        date = datetime.strptime(date_str, "%d/%m/%Y")
-    except ValueError:
+
+    # --- Ligne de données + ISIN ---
+    # Format typique :
+    #   Air Liquide 0,056753 176,20 EUR 10,00 EUR
+    #   ISIN : FR0000120073
+    nom, quantite, cours, montant_brut, isin = None, None, None, None, None
+
+    for i, line in enumerate(lines):
+        if re.search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})", line, re.IGNORECASE):
+            isin_match = re.search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})", line, re.IGNORECASE)
+            isin = isin_match.group(1).upper()
+            # La ligne précédente contient nom + qty + cours + montant
+            if i > 0:
+                prev = lines[i - 1]
+                m = re.search(
+                    r"^(.+?)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$",
+                    prev
+                )
+                if m:
+                    nom = m.group(1).strip()
+                    quantite = parse_fr_number(m.group(2))
+                    cours = parse_fr_number(m.group(3))
+                    montant_brut = parse_fr_number(m.group(4))
+            break
+
+    if not isin or quantite is None or quantite <= 0:
         return None
 
-    # ISIN + Nom
-    isin = search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})")
-    if not isin:
-        return None
+    # --- Taxe sur les transactions financières (TTF) ---
+    ttf = 0.0
+    for line in lines:
+        m = re.search(r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR", line, re.IGNORECASE)
+        if m:
+            ttf = parse_fr_number(m.group(1)) or 0.0
+            break
 
-    nom_match = re.search(
-        r"([A-Z][A-Za-zÀ-ÿ0-9\s&\-\.]{2,50}?)\s*\n?\s*ISIN\s*[:\s]*" + re.escape(isin),
-        text, re.IGNORECASE
-    )
-    nom = nom_match.group(1).strip() if nom_match else isin
-
-    # Quantité (fractionnaire)
-    quantite = parse_fr_number(search(r"(?:QUANTITÉ|Quantité)\s*([\d,]+)"))
-    if quantite is None:
-        quantite = parse_fr_number(search(re.escape(isin) + r".*?([\d,]+)\s+[\d,]+\s*EUR"))
-
-    # Cours moyen
-    cours = parse_fr_number(search(r"(?:COURS MOYEN|Cours moyen)\s*([\d,]+)\s*EUR"))
-
-    # Montant de la ligne
-    montant_brut = parse_fr_number(search(r"(?:MONTANT|Montant)\s*([\d,]+)\s*EUR"))
-
-    # Taxe sur les transactions financières
-    ttf = parse_fr_number(search(r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR")) or 0.0
-
-    # Total réellement débité
-    total = parse_fr_number(search(r"TOTAL\s*-?([\d,]+)\s*EUR"))
+    # --- Total réellement débité ---
+    total = None
+    for line in lines:
+        # On prend le TOTAL négatif du détail (le plus fiable)
+        m = re.search(r"TOTAL\s+(-[\d,]+)\s*EUR", line, re.IGNORECASE)
+        if m:
+            total = abs(parse_fr_number(m.group(1)) or 0)
+            break
     if total is None:
-        total = parse_fr_number(search(r"TOTAL\s+(-?[\d,]+)\s*EUR"))
+        for line in lines:
+            m = re.search(r"TOTAL\s+([\d,]+)\s*EUR", line, re.IGNORECASE)
+            if m:
+                total = parse_fr_number(m.group(1))
+                # On continue pour éventuellement trouver un total plus bas (avec TTF)
 
     if total is not None:
-        montant = abs(total)
+        montant = total
     elif montant_brut is not None:
         montant = round(montant_brut + ttf, 2)
     else:
-        return None
-
-    if quantite is None or quantite <= 0:
         return None
 
     return {
         "date": date,
         "type": "ACHAT",
         "quantite": quantite,
-        "valeur": nom,
+        "valeur": nom or isin,
         "isin": isin,
         "cours": cours,
         "solde": None,
@@ -190,7 +218,6 @@ def extract_transaction_from_traderepublic(pdf_file):
         "montant": montant,
         "source": "Trade Republic",
     }
-
 
 # ─────────────────────────────────────────────
 # CSV PER
