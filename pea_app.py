@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Application Streamlit - Suivi PEA + PER (version stabilisée)
+Application Streamlit - Suivi PEA + PER + CTO
+Support : CIC (PDF) + Trade Republic (PDF) + CSV/Manuel (PER)
 """
 
 import re
-import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -17,21 +17,24 @@ import matplotlib.dates as mdates
 
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Suivi PEA + PER",
+    page_title="Suivi PEA + PER + CTO",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 YAHOO_TICKERS = {
-    "FR0011550185": "ESE.PA",
-    "FR0011550193": "ETZ.PA",
-    "FR0013412020": "PAEEM.PA",
-    "FR0014003IY1": "WLDC.MI"
+    "FR0011550185": "ESE.PA",      # BNPP Easy S&P 500
+    "FR0011550193": "ETZ.PA",      # BNPP Easy Stoxx Europe 600
+    "FR0013412020": "PAEEM.PA",    # Amundi PEA MSCI EM ESG
+    "FR0014003IY1": "WLDC.MI",
+    "FR0000120073": "AI.PA",       # Air Liquide
 }
 
-COLORS = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#3B1F2B", "#6A994E"]
+COLORS = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#3B1F2B", "#6A994E", "#457B9D"]
 
+# ─────────────────────────────────────────────
+# Utilitaires
 # ─────────────────────────────────────────────
 def parse_fr_number(s):
     if s is None or (isinstance(s, float) and pd.isna(s)):
@@ -42,11 +45,10 @@ def parse_fr_number(s):
         return None
 
 
+# ─────────────────────────────────────────────
+# Parser CIC (PEA / CTO classique)
+# ─────────────────────────────────────────────
 def extract_transaction_from_pdf(pdf_file):
-    """
-    Extraction robuste d'un avis d'opération CIC.
-    Méthode fiable : Débit = Brut + Frais
-    """
     try:
         with pdfplumber.open(pdf_file) as pdf:
             text = pdf.pages[0].extract_text() or ""
@@ -57,59 +59,142 @@ def extract_transaction_from_pdf(pdf_file):
         m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
         return m.group(group) if m else None
 
-    # --- Champs principaux ---
-    quantite = search(r"Quantité\s+(\d+)")
+    type_op  = search(r"Type d'opération\s+(\w+)")
+    quantite = search(r"Quantité\s+([\d\s,]+)")
     valeur   = search(r"Valeur\s+(.+?)(?:\n|Lieu)")
     isin     = search(r"\((FR\d+)\)")
     date_str = search(r"Date et heure d'exécution\s+(\d{2}/\d{2}/\d{4})")
     cours    = search(r"Cours d'exécution\s+([\d,]+)\s*EUR")
-    solde    = search(r"Nouveau solde sur la valeur\s+(\d+)")
+    solde    = search(r"Nouveau solde sur la valeur\s+([\d\s,]+)")
 
-    # --- Brut ---
     brut = parse_fr_number(search(r"Brut de l'opération\s+([\d\s,]+)\s*EUR"))
-
-    # --- Frais de transaction ---
-    frais_match = re.search(
-        r"Frais de transaction\s+([\d\s,]+)\s*EUR",
-        text,
-        re.IGNORECASE
-    )
+    frais_match = re.search(r"Frais de transaction\s+([\d\s,]+)\s*EUR", text, re.IGNORECASE)
     frais = parse_fr_number(frais_match.group(1)) if frais_match else 0.0
 
-    # --- Débit (méthode fiable) ---
     if brut is not None:
-        debit = round(brut + (frais or 0.0), 2)
+        montant = round(brut + (frais or 0.0), 2)
     else:
-        # Fallback très strict
-        debit_match = re.search(
-            r"Débit en date de valeur.*?(\d{1,3}(?:\s\d{3})*(?:,\d+)?)\s*EUR",
-            text,
-            re.IGNORECASE | re.DOTALL
+        m = re.search(
+            r"(?:Débit|Crédit) en date de valeur.*?(\d{1,3}(?:\s\d{3})*(?:,\d+)?)\s*EUR",
+            text, re.IGNORECASE | re.DOTALL
         )
-        debit = parse_fr_number(debit_match.group(1)) if debit_match else None
+        montant = parse_fr_number(m.group(1)) if m else None
 
-    # --- Contrôles de validité ---
-    if not (isin and quantite and date_str and debit is not None):
+    if not (isin and quantite and date_str and montant is not None):
+        return None
+    if montant > 100_000:
         return None
 
-    # Sécurité : on rejette les montants absurdes (n° de compte mal parsé)
-    if debit > 100_000:
+    type_op = (type_op or "ACHAT").upper()
+    if type_op not in ("ACHAT", "VENTE"):
+        type_op = "ACHAT"
+
+    qty = parse_fr_number(quantite)
+    if qty is None:
         return None
 
     return {
         "date": datetime.strptime(date_str, "%d/%m/%Y"),
-        "quantite": int(quantite),
+        "type": type_op,
+        "quantite": qty,
         "valeur": re.sub(r"\s+", " ", valeur).strip() if valeur else None,
         "isin": isin,
         "cours": parse_fr_number(cours),
-        "solde": int(solde) if solde else None,
+        "solde": parse_fr_number(solde),
         "brut": brut,
         "frais": frais,
-        "debit": debit,
-        "source": "PDF",
+        "montant": montant,
+        "source": "CIC",
     }
 
 
+# ─────────────────────────────────────────────
+# Parser Trade Republic (CTO)
+# ─────────────────────────────────────────────
+def extract_transaction_from_traderepublic(pdf_file):
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            text = pdf.pages[0].extract_text() or ""
+    except Exception:
+        return None
+
+    if "TRADE REPUBLIC" not in text.upper() and "CONFIRMATION DE L'INVESTISSEMENT" not in text.upper():
+        return None
+
+    def search(pattern, group=1):
+        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        return m.group(group) if m else None
+
+    # Date
+    date_str = search(r"(?:Exécution de l'investissement programmé le|DATE)\s+(\d{2}[./]\d{2}[./]\d{4})")
+    if not date_str:
+        date_str = search(r"DATE\s+(\d{2}\.\d{2}\.\d{4})")
+    if not date_str:
+        return None
+    date_str = date_str.replace(".", "/")
+    try:
+        date = datetime.strptime(date_str, "%d/%m/%Y")
+    except ValueError:
+        return None
+
+    # ISIN + Nom
+    isin = search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})")
+    if not isin:
+        return None
+
+    nom_match = re.search(
+        r"([A-Z][A-Za-zÀ-ÿ0-9\s&\-\.]{2,50}?)\s*\n?\s*ISIN\s*[:\s]*" + re.escape(isin),
+        text, re.IGNORECASE
+    )
+    nom = nom_match.group(1).strip() if nom_match else isin
+
+    # Quantité (fractionnaire)
+    quantite = parse_fr_number(search(r"(?:QUANTITÉ|Quantité)\s*([\d,]+)"))
+    if quantite is None:
+        quantite = parse_fr_number(search(re.escape(isin) + r".*?([\d,]+)\s+[\d,]+\s*EUR"))
+
+    # Cours moyen
+    cours = parse_fr_number(search(r"(?:COURS MOYEN|Cours moyen)\s*([\d,]+)\s*EUR"))
+
+    # Montant de la ligne
+    montant_brut = parse_fr_number(search(r"(?:MONTANT|Montant)\s*([\d,]+)\s*EUR"))
+
+    # Taxe sur les transactions financières
+    ttf = parse_fr_number(search(r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR")) or 0.0
+
+    # Total réellement débité
+    total = parse_fr_number(search(r"TOTAL\s*-?([\d,]+)\s*EUR"))
+    if total is None:
+        total = parse_fr_number(search(r"TOTAL\s+(-?[\d,]+)\s*EUR"))
+
+    if total is not None:
+        montant = abs(total)
+    elif montant_brut is not None:
+        montant = round(montant_brut + ttf, 2)
+    else:
+        return None
+
+    if quantite is None or quantite <= 0:
+        return None
+
+    return {
+        "date": date,
+        "type": "ACHAT",
+        "quantite": quantite,
+        "valeur": nom,
+        "isin": isin,
+        "cours": cours,
+        "solde": None,
+        "brut": montant_brut,
+        "frais": ttf,
+        "montant": montant,
+        "source": "Trade Republic",
+    }
+
+
+# ─────────────────────────────────────────────
+# CSV PER
+# ─────────────────────────────────────────────
 def parse_csv_transactions(uploaded_file) -> list[dict]:
     try:
         df = pd.read_csv(uploaded_file, sep=None, engine="python")
@@ -118,7 +203,6 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
         df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8")
 
     df.columns = [str(c).strip().lower() for c in df.columns]
-
     if not {"date", "quantite", "isin"}.issubset(set(df.columns)):
         st.error("Colonnes obligatoires manquantes : date, quantite, isin")
         return []
@@ -126,7 +210,6 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
     transactions = []
     for _, row in df.iterrows():
         try:
-            # Date
             date_val = row["date"]
             if isinstance(date_val, str):
                 for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
@@ -140,7 +223,7 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
             else:
                 date = pd.to_datetime(date_val).to_pydatetime()
 
-            quantite = float(row["quantite"])          # ← float
+            quantite = float(row["quantite"])
             isin = str(row["isin"]).strip().upper()
             nom = str(row.get("nom", "") or "").strip() or None
             cours = parse_fr_number(row.get("cours"))
@@ -149,7 +232,6 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
 
             if montant is None and cours is not None:
                 montant = round(quantite * cours + frais, 2)
-
             if montant is None or quantite <= 0:
                 continue
 
@@ -172,10 +254,12 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
             })
         except Exception:
             continue
-
     return transactions
 
 
+# ─────────────────────────────────────────────
+# Traitement commun
+# ─────────────────────────────────────────────
 def process_transactions(transactions: list) -> tuple[pd.DataFrame, dict]:
     if not transactions:
         return pd.DataFrame(), {}
@@ -184,12 +268,7 @@ def process_transactions(transactions: list) -> tuple[pd.DataFrame, dict]:
     df = pd.DataFrame(transactions)
     df["date_str"] = df["date"].dt.strftime("%d/%m/%Y")
 
-    by_isin = defaultdict(lambda: {
-        "name": "",
-        "parts": 0.0,
-        "investi": 0.0,
-        "ops": []
-    })
+    by_isin = defaultdict(lambda: {"name": "", "parts": 0.0, "investi": 0.0, "ops": []})
 
     for t in transactions:
         isin = t["isin"]
@@ -206,19 +285,18 @@ def process_transactions(transactions: list) -> tuple[pd.DataFrame, dict]:
         elif typ == "VENTE":
             if by_isin[isin]["parts"] > 0:
                 cout_unitaire = by_isin[isin]["investi"] / by_isin[isin]["parts"]
-                cout_vendu = cout_unitaire * qty
                 by_isin[isin]["parts"] = max(0.0, by_isin[isin]["parts"] - qty)
-                by_isin[isin]["investi"] = max(0.0, by_isin[isin]["investi"] - cout_vendu)
+                by_isin[isin]["investi"] = max(0.0, by_isin[isin]["investi"] - cout_unitaire * qty)
 
         t["type"] = typ
         t["montant"] = montant
         by_isin[isin]["ops"].append(t)
 
-        # Si le PDF fournit un solde, on le respecte en priorité
         if t.get("solde") is not None:
             by_isin[isin]["parts"] = float(t["solde"])
 
     return df, dict(by_isin)
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_current_prices(isins: tuple):
@@ -242,12 +320,12 @@ def get_current_prices(isins: tuple):
     return prices
 
 
-@st.cache_data(ttl=6*3600, show_spinner=False)
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
 def get_historical_prices(ticker: str, start: datetime, end: datetime):
     try:
         hist = yf.Ticker(ticker).history(
             start=start.strftime("%Y-%m-%d"),
-            end=(end + timedelta(days=1)).strftime("%Y-%m-%d")
+            end=(end + timedelta(days=1)).strftime("%Y-%m-%d"),
         )
         if hist.empty:
             return pd.Series(dtype=float)
@@ -260,11 +338,7 @@ def get_historical_prices(ticker: str, start: datetime, end: datetime):
 
 def build_history(by_isin: dict, transactions: list) -> dict:
     if not transactions:
-        return {
-            "portfolio_value": pd.Series(dtype=float),
-            "invested_cumul": pd.Series(dtype=float),
-            "parts_history": {},
-        }
+        return {"portfolio_value": pd.Series(dtype=float), "invested_cumul": pd.Series(dtype=float), "parts_history": {}}
 
     start_date = min(t["date"] for t in transactions) - timedelta(days=3)
     end_date = datetime.now()
@@ -278,14 +352,12 @@ def build_history(by_isin: dict, transactions: list) -> dict:
         ticker = YAHOO_TICKERS.get(isin)
         if not ticker:
             continue
-
         prices = get_historical_prices(ticker, start_date, end_date)
         if prices.empty:
             continue
 
         parts_series = pd.Series(0.0, index=all_dates)
-        cost_series = pd.Series(0.0, index=all_dates)  # coût de revient restant
-
+        cost_series = pd.Series(0.0, index=all_dates)
         running_parts = 0.0
         running_cost = 0.0
 
@@ -309,7 +381,6 @@ def build_history(by_isin: dict, transactions: list) -> dict:
         prices = prices.reindex(all_dates).ffill()
         portfolio_value += (parts_series * prices).fillna(0)
         invested_cumul += cost_series
-
         parts_history[isin] = parts_series
 
     return {
@@ -353,49 +424,36 @@ if "histories" not in st.session_state:
 # ─────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────
-st.title("📈 Suivi PEA + PER")
+st.title("📈 Suivi PEA + PER + CTO")
 
 with st.sidebar:
     st.header("📂 Import")
 
-    st.subheader("PEA (PDF)")
+    st.subheader("PEA (PDF CIC)")
     pea_files = st.file_uploader("Avis d'opération PEA", type=["pdf"], accept_multiple_files=True, key="pea")
+
+    st.subheader("CTO (PDF Trade Republic ou CIC)")
+    cto_files = st.file_uploader("Avis d'opération CTO", type=["pdf"], accept_multiple_files=True, key="cto")
 
     st.subheader("PER")
     per_csv = st.file_uploader("CSV opérations PER", type=["csv"], key="per_csv")
 
-    with st.expander("➕ Ajouter une opération PER manuellement"):
+    with st.expander("➕ Ajouter opération PER manuellement"):
         with st.form("manual_per_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
-    
             with c1:
-                m_date = st.date_input("Date", value=datetime.now())
-                m_type = st.selectbox("Type d'opération", ["ACHAT", "VENTE"])
-                m_quantite = st.number_input(
-                    "Quantité (parts)",
-                    min_value=0.0,
-                    step=0.001,
-                    format="%.4f",
-                    value=1.0
-                )
-                m_isin = st.text_input("ISIN", placeholder="FR0011550185")
-    
+                m_date = st.date_input("Date", value=datetime.now(), key="per_date")
+                m_type = st.selectbox("Type", ["ACHAT", "VENTE"], key="per_type")
+                m_quantite = st.number_input("Quantité (parts)", min_value=0.0, step=0.001, format="%.4f", value=1.0, key="per_qty")
+                m_isin = st.text_input("ISIN", placeholder="FR0011550185", key="per_isin")
             with c2:
-                m_nom = st.text_input("Nom (optionnel)", placeholder="BNPP Easy S&P 500")
-                m_cours = st.number_input("Cours (€)", min_value=0.0, format="%.4f", value=0.0)
-                m_frais = st.number_input("Frais (€)", min_value=0.0, format="%.2f", value=0.0)
-    
-            submitted = st.form_submit_button("Ajouter l'opération")
-    
-            if submitted:
-                if not m_isin or m_cours <= 0 or m_quantite <= 0:
-                    st.error("ISIN, Quantité et Cours sont obligatoires.")
-                else:
-                    quantite = float(m_quantite)
-                    cours = float(m_cours)
-                    frais = float(m_frais)
+                m_nom = st.text_input("Nom (optionnel)", key="per_nom")
+                m_cours = st.number_input("Cours (€)", min_value=0.0, format="%.4f", key="per_cours")
+                m_frais = st.number_input("Frais (€)", min_value=0.0, format="%.2f", key="per_frais")
+            if st.form_submit_button("Ajouter"):
+                if m_isin and m_cours > 0 and m_quantite > 0:
+                    quantite, cours, frais = float(m_quantite), float(m_cours), float(m_frais)
                     montant = round(quantite * cours + frais, 2)
-    
                     st.session_state["per_manual"].append({
                         "date": datetime.combine(m_date, datetime.min.time()),
                         "type": m_type,
@@ -409,22 +467,31 @@ with st.sidebar:
                         "montant": montant,
                         "source": "Manuel",
                     })
-                    st.success(f"Opération {m_type} ajoutée ({quantite:.4f} parts)")
+                    st.success(f"{m_type} ajouté ({quantite:.4f} parts)")
+                else:
+                    st.error("ISIN, Quantité et Cours obligatoires")
 
     if st.session_state["per_manual"]:
-        st.caption(f"{len(st.session_state['per_manual'])} opération(s) manuelle(s)")
-        if st.button("🗑️ Vider les opérations manuelles"):
+        st.caption(f"{len(st.session_state['per_manual'])} opération(s) PER manuelle(s)")
+        if st.button("🗑️ Vider opérations PER manuelles"):
             st.session_state["per_manual"] = []
             st.rerun()
 
-    mode = st.radio("Mode d'affichage", ["PEA", "PER", "Cumul PEA + PER"])
+    mode = st.radio(
+        "Mode d'affichage",
+        ["PEA", "PER", "CTO", "Cumul PEA + PER", "Cumul total (PEA+PER+CTO)"],
+    )
 
     st.markdown("---")
     st.markdown("**Modèle CSV PER**")
-    st.code("date,quantite,isin,nom,cours,frais,debit\n15/03/2026,20,FR0011550185,BNPP Easy S&P 500,31.50,2.50,632.50", language=None)
+    st.code(
+        "date,quantite,isin,nom,cours,frais,montant,type\n"
+        "15/03/2026,20.5,FR0011550185,BNPP Easy S&P 500,31.50,2.50,648.25,ACHAT",
+        language=None,
+    )
 
 # ─────────────────────────────────────────────
-# Traitement des données
+# Traitement
 # ─────────────────────────────────────────────
 try:
     # PEA
@@ -436,40 +503,46 @@ try:
                 pea_transactions.append(tx)
     pea_df, pea_by_isin = process_transactions(pea_transactions)
 
+    # CTO (Trade Republic en priorité, sinon CIC)
+    cto_transactions = []
+    if cto_files:
+        for f in cto_files:
+            tx = extract_transaction_from_traderepublic(f)
+            if tx is None:
+                tx = extract_transaction_from_pdf(f)
+            if tx:
+                cto_transactions.append(tx)
+    cto_df, cto_by_isin = process_transactions(cto_transactions)
+
     # PER
     per_transactions = []
     if per_csv is not None:
         per_transactions.extend(parse_csv_transactions(per_csv))
     per_transactions.extend(st.session_state["per_manual"])
-
-    # Recalcul soldes PER
-    if per_transactions:
-        by_isin_qty = defaultdict(int)
-        for t in sorted(per_transactions, key=lambda x: x["date"]):
-            by_isin_qty[t["isin"]] += t["quantite"]
-            t["solde"] = by_isin_qty[t["isin"]]
-
     per_df, per_by_isin = process_transactions(per_transactions)
 
-    # Choix du mode
+    # Sélection du mode
     if mode == "PEA":
-        transactions = pea_transactions
-        df = pea_df
-        by_isin = pea_by_isin
+        transactions, df, by_isin = pea_transactions, pea_df, pea_by_isin
         key = f"pea_{len(pea_transactions)}"
     elif mode == "PER":
-        transactions = per_transactions
-        df = per_df
-        by_isin = per_by_isin
+        transactions, df, by_isin = per_transactions, per_df, per_by_isin
         key = f"per_{len(per_transactions)}"
-    else:
+    elif mode == "CTO":
+        transactions, df, by_isin = cto_transactions, cto_df, cto_by_isin
+        key = f"cto_{len(cto_transactions)}"
+    elif mode == "Cumul PEA + PER":
         transactions = pea_transactions + per_transactions
         df, by_isin = process_transactions(transactions)
-        key = f"cumul_{len(pea_transactions)}_{len(per_transactions)}"
+        key = f"pea_per_{len(pea_transactions)}_{len(per_transactions)}"
+    else:
+        transactions = pea_transactions + per_transactions + cto_transactions
+        df, by_isin = process_transactions(transactions)
+        key = f"total_{len(pea_transactions)}_{len(per_transactions)}_{len(cto_transactions)}"
 
     if not transactions:
         st.warning("Aucune opération chargée.")
-        st.info("Dépose des PDF PEA ou un CSV / saisie manuelle pour le PER.")
+        st.info("Dépose des PDF PEA/CTO ou un CSV / saisie manuelle pour le PER.")
         st.stop()
 
     # Valorisation
@@ -506,52 +579,32 @@ try:
 
     with tab1:
         if not summary_df.empty:
-            # Force les colonnes numériques
             valo = pd.to_numeric(summary_df["Valorisation (€)"], errors="coerce").fillna(0)
             investi = pd.to_numeric(summary_df["Investi (€)"], errors="coerce").fillna(0)
             labels = summary_df["Nom"].astype(str).str[:25]
-    
-            # On ignore les lignes à 0 pour éviter les camemberts vides
             mask_valo = valo > 0
             mask_investi = investi > 0
-    
+
             col1, col2 = st.columns(2)
-    
             with col1:
                 st.markdown("**Répartition valorisation**")
                 if mask_valo.any():
                     fig, ax = plt.subplots(figsize=(6, 5))
-                    ax.pie(
-                        valo[mask_valo],
-                        labels=labels[mask_valo],
-                        autopct="%1.1f%%",
-                        colors=COLORS[:mask_valo.sum()],
-                        startangle=90
-                    )
+                    ax.pie(valo[mask_valo], labels=labels[mask_valo], autopct="%1.1f%%",
+                           colors=COLORS[:mask_valo.sum()], startangle=90)
                     ax.set_title(f"Total : {valo.sum():,.0f} €")
                     st.pyplot(fig)
                     plt.close()
-                else:
-                    st.info("Aucune valorisation disponible")
-    
             with col2:
                 st.markdown("**Répartition investi**")
                 if mask_investi.any():
                     fig, ax = plt.subplots(figsize=(6, 5))
-                    ax.pie(
-                        investi[mask_investi],
-                        labels=labels[mask_investi],
-                        autopct="%1.1f%%",
-                        colors=COLORS[:mask_investi.sum()],
-                        startangle=90
-                    )
+                    ax.pie(investi[mask_investi], labels=labels[mask_investi], autopct="%1.1f%%",
+                           colors=COLORS[:mask_investi.sum()], startangle=90)
                     ax.set_title(f"Total : {investi.sum():,.0f} €")
                     st.pyplot(fig)
                     plt.close()
-                else:
-                    st.info("Aucun capital investi")
-    
-            # Tableau
+
             st.dataframe(
                 summary_df.style.format({
                     "Parts": "{:.4f}",
@@ -562,30 +615,22 @@ try:
                     "Plus-value (%)": "{:+.1f}",
                 }, na_rep="-"),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
 
     with tab2:
         if not df.empty:
             display_cols = ["date_str", "type", "quantite", "isin", "valeur", "cours", "montant", "frais", "solde", "source"]
-            # On ne garde que les colonnes qui existent réellement
             display_cols = [c for c in display_cols if c in df.columns]
-            
             st.dataframe(
                 df[display_cols].rename(columns={
-                    "date_str": "Date",
-                    "type": "Type",
-                    "quantite": "Quantité",
-                    "isin": "ISIN",
-                    "valeur": "Valeur",
-                    "cours": "Cours (€)",
-                    "montant": "Montant (€)",
-                    "frais": "Frais (€)",
-                    "solde": "Solde",
-                    "source": "Source",
+                    "date_str": "Date", "type": "Type", "quantite": "Quantité",
+                    "isin": "ISIN", "valeur": "Valeur", "cours": "Cours (€)",
+                    "montant": "Montant (€)", "frais": "Frais (€)",
+                    "solde": "Solde", "source": "Source",
                 }),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
 
     with tab3:
@@ -610,9 +655,12 @@ try:
 
     with tab4:
         if not summary_df.empty:
-            st.download_button("Télécharger synthèse CSV",
-                               summary_df.to_csv(index=False).encode("utf-8-sig"),
-                               f"synthese_{mode}.csv", "text/csv")
+            st.download_button(
+                "Télécharger synthèse CSV",
+                summary_df.to_csv(index=False).encode("utf-8-sig"),
+                f"synthese_{mode.replace(' ', '_')}.csv",
+                "text/csv",
+            )
 
 except Exception as e:
     st.error("Une erreur est survenue :")
