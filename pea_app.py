@@ -459,7 +459,7 @@ with st.sidebar:
     st.subheader("PEA (PDF CIC)")
     pea_files = st.file_uploader("Avis d'opération PEA", type=["pdf"], accept_multiple_files=True, key="pea")
 
-    st.subheader("CTO (PDF Trade Republic ou CIC)")
+    st.subheader("CTO (PDF Trade Republic)")
     cto_files = st.file_uploader("Avis d'opération CTO", type=["pdf"], accept_multiple_files=True, key="cto")
 
     st.subheader("PER")
@@ -558,10 +558,10 @@ try:
     elif mode == "CTO":
         transactions, df, by_isin = cto_transactions, cto_df, cto_by_isin
         key = f"cto_{len(cto_transactions)}"
-    elif mode == "Cumul PEA + PER":
-        transactions = pea_transactions + per_transactions
-        df, by_isin = process_transactions(transactions)
-        key = f"pea_per_{len(pea_transactions)}_{len(per_transactions)}"
+    #elif mode == "Cumul PEA + PER":
+    #    transactions = pea_transactions + per_transactions
+    #    df, by_isin = process_transactions(transactions)
+    #    key = f"pea_per_{len(pea_transactions)}_{len(per_transactions)}"
     else:
         transactions = pea_transactions + per_transactions + cto_transactions
         df, by_isin = process_transactions(transactions)
