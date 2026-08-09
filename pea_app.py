@@ -24,11 +24,15 @@ st.set_page_config(
 )
 
 YAHOO_TICKERS = {
-    "FR0011550185": "ESE.PA",      # BNPP Easy S&P 500
-    "FR0011550193": "ETZ.PA",      # BNPP Easy Stoxx Europe 600
-    "FR0013412020": "PAEEM.PA",    # Amundi PEA MSCI EM ESG
-    "FR0014003IY1": "WLDC.MI",
-    "FR0000120073": "AI.PA",       # Air Liquide
+    "FR0011550185": "ESE.PA",           # BNPP Easy S&P 500
+    "FR0011550193": "ETZ.PA",           # BNPP Easy Stoxx Europe 600
+    "FR0013412020": "PAEEM.PA",         # Amundi PEA MSCI EM ESG
+    "FR0014003IY1": "WLDC.MI",          # Amundi MSCI WORLD II UCITS ETF
+    "FR0000120073": "AI.PA",            # Air Liquide
+    "IE00B5BMR087": "CSSPX.MI",         # Ishare Core S&P500 USD (Acc)
+    "FR0000051070": "MAU.PA",           # Etablissement Maurel & Prom SA
+    "AU000000EUR7": "EUR.EX",           # European Lithium Ltd
+    "IE00BMFKG444": "IE00BMFKG444.SG",  # Xtrackers NASDAQ 100 Notional NR
 }
 
 COLORS = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#3B1F2B", "#6A994E", "#457B9D"]
@@ -506,7 +510,7 @@ with st.sidebar:
 
     mode = st.radio(
         "Mode d'affichage",
-        ["PEA", "PER", "CTO", "Cumul PEA + PER", "Cumul total (PEA+PER+CTO)"],
+        ["PEA", "PER", "CTO", "Cumul total PEA+PER+CTO"],
     )
 
     st.markdown("---")
