@@ -118,6 +118,7 @@ def extract_transaction_from_pdf(pdf_file):
 def extract_transaction_from_traderepublic(pdf_file):
     """
     Parse les confirmations d'investissement programmé Trade Republic.
+    Gère les ISIN FR, IE, etc. et les noms avec parenthèses.
     """
     try:
         with pdfplumber.open(pdf_file) as pdf:
@@ -133,7 +134,6 @@ def extract_transaction_from_traderepublic(pdf_file):
     # --- Date ---
     date = None
     for line in lines:
-        # "Exécution de l'investissement programmé le 02/10/2025"
         m = re.search(r"le\s+(\d{2}/\d{2}/\d{4})", line)
         if m:
             try:
@@ -141,7 +141,6 @@ def extract_transaction_from_traderepublic(pdf_file):
                 break
             except ValueError:
                 pass
-        # "DATE 02.10.2025"
         m = re.search(r"DATE\s+(\d{2})\.(\d{2})\.(\d{4})", line, re.IGNORECASE)
         if m:
             try:
@@ -153,20 +152,18 @@ def extract_transaction_from_traderepublic(pdf_file):
         return None
 
     # --- Ligne de données + ISIN ---
-    # Format typique :
-    #   Air Liquide 0,056753 176,20 EUR 10,00 EUR
-    #   ISIN : FR0000120073
     nom, quantite, cours, montant_brut, isin = None, None, None, None, None
 
     for i, line in enumerate(lines):
-        if re.search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})", line, re.IGNORECASE):
-            isin_match = re.search(r"ISIN\s*[:\s]*([A-Z]{2}\d{10})", line, re.IGNORECASE)
+        # ISIN : 2 lettres + 10 caractères alphanumériques
+        isin_match = re.search(r"ISIN\s*[:\s]*([A-Z]{2}[A-Z0-9]{10})", line, re.IGNORECASE)
+        if isin_match:
             isin = isin_match.group(1).upper()
-            # La ligne précédente contient nom + qty + cours + montant
             if i > 0:
                 prev = lines[i - 1]
+                # Nom (peut contenir des parenthèses) + qty + cours + montant
                 m = re.search(
-                    r"^(.+?)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$",
+                    r"^(.+)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$",
                     prev
                 )
                 if m:
@@ -189,8 +186,8 @@ def extract_transaction_from_traderepublic(pdf_file):
 
     # --- Total réellement débité ---
     total = None
+    # Priorité au total négatif (montant réellement prélevé)
     for line in lines:
-        # On prend le TOTAL négatif du détail (le plus fiable)
         m = re.search(r"TOTAL\s+(-[\d,]+)\s*EUR", line, re.IGNORECASE)
         if m:
             total = abs(parse_fr_number(m.group(1)) or 0)
@@ -200,7 +197,7 @@ def extract_transaction_from_traderepublic(pdf_file):
             m = re.search(r"TOTAL\s+([\d,]+)\s*EUR", line, re.IGNORECASE)
             if m:
                 total = parse_fr_number(m.group(1))
-                # On continue pour éventuellement trouver un total plus bas (avec TTF)
+                break
 
     if total is not None:
         montant = total
@@ -222,7 +219,6 @@ def extract_transaction_from_traderepublic(pdf_file):
         "montant": montant,
         "source": "Trade Republic",
     }
-
 # ─────────────────────────────────────────────
 # CSV PER
 # ─────────────────────────────────────────────
