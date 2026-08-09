@@ -31,7 +31,7 @@ YAHOO_TICKERS = {
     "FR0000120073": "AI.PA",            # Air Liquide
     "IE00B5BMR087": "CSSPX.MI",         # Ishare Core S&P500 USD (Acc)
     "FR0000051070": "MAU.PA",           # Etablissement Maurel & Prom SA
-    "AU000000EUR7": "EUR.EX",           # European Lithium Ltd
+    "AU000000EUR7": "EUR.AX",           # European Lithium Ltd
     "IE00BMFKG444": "IE00BMFKG444.SG",  # Xtrackers NASDAQ 100 Notional NR
 }
 
