@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Application Streamlit - Suivi PEA + PER + CTO
-Support : CIC (PDF) + Trade Republic (PDF) + CSV/Manuel (PER)
+- PEA  : PDF CIC + saisie manuelle (ACHAT/VENTE)
+- PER  : CSV + saisie manuelle
+- CTO  : PDF Trade Republic (+ fallback CIC)
+- Cours manuels pour OPCVM sans Yahoo
+- Graphiques, export, cumul
 """
 
 import re
@@ -24,15 +28,15 @@ st.set_page_config(
 )
 
 YAHOO_TICKERS = {
-    "FR0011550185": "ESE.PA",           # BNPP Easy S&P 500
-    "FR0011550193": "ETZ.PA",           # BNPP Easy Stoxx Europe 600
-    "FR0013412020": "PAEEM.PA",         # Amundi PEA MSCI EM ESG
-    "FR0014003IY1": "WLDC.MI",          # Amundi MSCI WORLD II UCITS ETF
-    "FR0000120073": "AI.PA",            # Air Liquide
-    "IE00B5BMR087": "CSSPX.MI",         # Ishare Core S&P500 USD (Acc)
-    "FR0000051070": "MAU.PA",           # Etablissement Maurel & Prom SA
-    "AU000000EUR7": "EUR.AX",           # European Lithium Ltd
-    "IE00BMFKG444": "IE00BMFKG444.SG",  # Xtrackers NASDAQ 100 Notional NR
+    "FR0011550185": "ESE.PA",       # BNPP Easy S&P 500
+    "FR0011550193": "ETZ.PA",       # BNPP Easy Stoxx Europe 600
+    "FR0013412020": "PAEEM.PA",     # Amundi PEA MSCI EM ESG
+    "FR0014003IY1": "WLDC.MI",
+    "FR0000120073": "AI.PA",        # Air Liquide
+    "FR0000051070": "MAU.PA",       # Maurel & Prom
+    "IE00B5BMR087": "CSPX.L",       # iShares Core S&P 500
+    "IE00BMFKG444": "XNAS.DE",      # Xtrackers Nasdaq 100
+    "AU000000EUR7": "PF8.F",        # European Lithium (EUR)
 }
 
 COLORS = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#3B1F2B", "#6A994E", "#457B9D"]
@@ -50,7 +54,7 @@ def parse_fr_number(s):
 
 
 # ─────────────────────────────────────────────
-# Parser CIC (PEA / CTO classique)
+# Parser CIC (PEA / CTO)
 # ─────────────────────────────────────────────
 def extract_transaction_from_pdf(pdf_file):
     try:
@@ -63,13 +67,13 @@ def extract_transaction_from_pdf(pdf_file):
         m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
         return m.group(group) if m else None
 
-    type_op  = search(r"Type d'opération\s+(\w+)")
+    type_op = search(r"Type d'opération\s+(\w+)")
     quantite = search(r"Quantité\s+([\d\s,]+)")
-    valeur   = search(r"Valeur\s+(.+?)(?:\n|Lieu)")
-    isin     = search(r"\((FR\d+)\)")
+    valeur = search(r"Valeur\s+(.+?)(?:\n|Lieu)")
+    isin = search(r"\(([A-Z]{2}[A-Z0-9]{10})\)")
     date_str = search(r"Date et heure d'exécution\s+(\d{2}/\d{2}/\d{4})")
-    cours    = search(r"Cours d'exécution\s+([\d,]+)\s*EUR")
-    solde    = search(r"Nouveau solde sur la valeur\s+([\d\s,]+)")
+    cours = search(r"Cours d'exécution\s+([\d,]+)\s*EUR")
+    solde = search(r"Nouveau solde sur la valeur\s+([\d\s,]+)")
 
     brut = parse_fr_number(search(r"Brut de l'opération\s+([\d\s,]+)\s*EUR"))
     frais_match = re.search(r"Frais de transaction\s+([\d\s,]+)\s*EUR", text, re.IGNORECASE)
@@ -80,7 +84,7 @@ def extract_transaction_from_pdf(pdf_file):
     else:
         m = re.search(
             r"(?:Débit|Crédit) en date de valeur.*?(\d{1,3}(?:\s\d{3})*(?:,\d+)?)\s*EUR",
-            text, re.IGNORECASE | re.DOTALL
+            text, re.IGNORECASE | re.DOTALL,
         )
         montant = parse_fr_number(m.group(1)) if m else None
 
@@ -116,10 +120,6 @@ def extract_transaction_from_pdf(pdf_file):
 # Parser Trade Republic (CTO)
 # ─────────────────────────────────────────────
 def extract_transaction_from_traderepublic(pdf_file):
-    """
-    Parse les confirmations d'investissement programmé Trade Republic.
-    Gère les ISIN FR, IE, etc. et les noms avec parenthèses.
-    """
     try:
         with pdfplumber.open(pdf_file) as pdf:
             text = pdf.pages[0].extract_text() or ""
@@ -131,7 +131,7 @@ def extract_transaction_from_traderepublic(pdf_file):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    # --- Date ---
+    # Date
     date = None
     for line in lines:
         m = re.search(r"le\s+(\d{2}/\d{2}/\d{4})", line)
@@ -151,21 +151,15 @@ def extract_transaction_from_traderepublic(pdf_file):
     if date is None:
         return None
 
-    # --- Ligne de données + ISIN ---
+    # Ligne données + ISIN
     nom, quantite, cours, montant_brut, isin = None, None, None, None, None
-
     for i, line in enumerate(lines):
-        # ISIN : 2 lettres + 10 caractères alphanumériques
         isin_match = re.search(r"ISIN\s*[:\s]*([A-Z]{2}[A-Z0-9]{10})", line, re.IGNORECASE)
         if isin_match:
             isin = isin_match.group(1).upper()
             if i > 0:
                 prev = lines[i - 1]
-                # Nom (peut contenir des parenthèses) + qty + cours + montant
-                m = re.search(
-                    r"^(.+)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$",
-                    prev
-                )
+                m = re.search(r"^(.+)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$", prev)
                 if m:
                     nom = m.group(1).strip()
                     quantite = parse_fr_number(m.group(2))
@@ -176,7 +170,7 @@ def extract_transaction_from_traderepublic(pdf_file):
     if not isin or quantite is None or quantite <= 0:
         return None
 
-    # --- Taxe sur les transactions financières (TTF) ---
+    # TTF
     ttf = 0.0
     for line in lines:
         m = re.search(r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR", line, re.IGNORECASE)
@@ -184,9 +178,8 @@ def extract_transaction_from_traderepublic(pdf_file):
             ttf = parse_fr_number(m.group(1)) or 0.0
             break
 
-    # --- Total réellement débité ---
+    # Total débité
     total = None
-    # Priorité au total négatif (montant réellement prélevé)
     for line in lines:
         m = re.search(r"TOTAL\s+(-[\d,]+)\s*EUR", line, re.IGNORECASE)
         if m:
@@ -219,10 +212,12 @@ def extract_transaction_from_traderepublic(pdf_file):
         "montant": montant,
         "source": "Trade Republic",
     }
+
+
 # ─────────────────────────────────────────────
 # CSV PER
 # ─────────────────────────────────────────────
-def parse_csv_transactions(uploaded_file) -> list[dict]:
+def parse_csv_transactions(uploaded_file) -> list:
     try:
         df = pd.read_csv(uploaded_file, sep=None, engine="python")
     except Exception:
@@ -256,7 +251,6 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
             cours = parse_fr_number(row.get("cours"))
             frais = parse_fr_number(row.get("frais")) or 0.0
             montant = parse_fr_number(row.get("debit") or row.get("montant"))
-
             if montant is None and cours is not None:
                 montant = round(quantite * cours + frais, 2)
             if montant is None or quantite <= 0:
@@ -285,9 +279,9 @@ def parse_csv_transactions(uploaded_file) -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Traitement commun
+# Traitement commun (ACHAT / VENTE + float)
 # ─────────────────────────────────────────────
-def process_transactions(transactions: list) -> tuple[pd.DataFrame, dict]:
+def process_transactions(transactions: list):
     if not transactions:
         return pd.DataFrame(), {}
 
@@ -443,10 +437,9 @@ def build_summary(by_isin, current_prices):
 # ─────────────────────────────────────────────
 # Session state
 # ─────────────────────────────────────────────
-if "per_manual" not in st.session_state:
-    st.session_state["per_manual"] = []
-if "histories" not in st.session_state:
-    st.session_state["histories"] = {}
+for key in ("pea_manual", "per_manual", "manual_prices", "histories"):
+    if key not in st.session_state:
+        st.session_state[key] = [] if key.endswith("manual") else {}
 
 # ─────────────────────────────────────────────
 # Sidebar
@@ -456,12 +449,54 @@ st.title("📈 Suivi PEA + PER + CTO")
 with st.sidebar:
     st.header("📂 Import")
 
+    # —— PEA ——
     st.subheader("PEA (PDF CIC)")
     pea_files = st.file_uploader("Avis d'opération PEA", type=["pdf"], accept_multiple_files=True, key="pea")
 
-    st.subheader("CTO (PDF Trade Republic)")
+    with st.expander("➕ Ajouter opération PEA manuellement"):
+        with st.form("manual_pea_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                p_date = st.date_input("Date", value=datetime.now(), key="pea_date")
+                p_type = st.selectbox("Type", ["ACHAT", "VENTE"], key="pea_type")
+                p_quantite = st.number_input("Quantité", min_value=0.0, step=0.001, format="%.4f", value=1.0, key="pea_qty")
+                p_isin = st.text_input("ISIN", key="pea_isin")
+            with c2:
+                p_nom = st.text_input("Nom (optionnel)", key="pea_nom")
+                p_cours = st.number_input("Cours (€)", min_value=0.0, format="%.4f", key="pea_cours")
+                p_frais = st.number_input("Frais (€)", min_value=0.0, format="%.2f", key="pea_frais")
+            if st.form_submit_button("Ajouter"):
+                if p_isin and p_cours > 0 and p_quantite > 0:
+                    q, c, f = float(p_quantite), float(p_cours), float(p_frais)
+                    montant = round(q * c + f, 2)
+                    st.session_state["pea_manual"].append({
+                        "date": datetime.combine(p_date, datetime.min.time()),
+                        "type": p_type,
+                        "quantite": q,
+                        "valeur": p_nom.strip() or p_isin.strip().upper(),
+                        "isin": p_isin.strip().upper(),
+                        "cours": c,
+                        "solde": None,
+                        "brut": round(q * c, 2),
+                        "frais": f,
+                        "montant": montant,
+                        "source": "Manuel PEA",
+                    })
+                    st.success(f"{p_type} PEA ajouté")
+                else:
+                    st.error("ISIN, Quantité et Cours obligatoires")
+
+    if st.session_state["pea_manual"]:
+        st.caption(f"{len(st.session_state['pea_manual'])} op. PEA manuelle(s)")
+        if st.button("🗑️ Vider PEA manuelles"):
+            st.session_state["pea_manual"] = []
+            st.rerun()
+
+    # —— CTO ——
+    st.subheader("CTO (Trade Republic / CIC)")
     cto_files = st.file_uploader("Avis d'opération CTO", type=["pdf"], accept_multiple_files=True, key="cto")
 
+    # —— PER ——
     st.subheader("PER")
     per_csv = st.file_uploader("CSV opérations PER", type=["csv"], key="per_csv")
 
@@ -471,42 +506,58 @@ with st.sidebar:
             with c1:
                 m_date = st.date_input("Date", value=datetime.now(), key="per_date")
                 m_type = st.selectbox("Type", ["ACHAT", "VENTE"], key="per_type")
-                m_quantite = st.number_input("Quantité (parts)", min_value=0.0, step=0.001, format="%.4f", value=1.0, key="per_qty")
-                m_isin = st.text_input("ISIN", placeholder="FR0011550185", key="per_isin")
+                m_quantite = st.number_input("Quantité", min_value=0.0, step=0.001, format="%.4f", value=1.0, key="per_qty")
+                m_isin = st.text_input("ISIN", key="per_isin")
             with c2:
                 m_nom = st.text_input("Nom (optionnel)", key="per_nom")
                 m_cours = st.number_input("Cours (€)", min_value=0.0, format="%.4f", key="per_cours")
                 m_frais = st.number_input("Frais (€)", min_value=0.0, format="%.2f", key="per_frais")
             if st.form_submit_button("Ajouter"):
                 if m_isin and m_cours > 0 and m_quantite > 0:
-                    quantite, cours, frais = float(m_quantite), float(m_cours), float(m_frais)
-                    montant = round(quantite * cours + frais, 2)
+                    q, c, f = float(m_quantite), float(m_cours), float(m_frais)
+                    montant = round(q * c + f, 2)
                     st.session_state["per_manual"].append({
                         "date": datetime.combine(m_date, datetime.min.time()),
                         "type": m_type,
-                        "quantite": quantite,
+                        "quantite": q,
                         "valeur": m_nom.strip() or m_isin.strip().upper(),
                         "isin": m_isin.strip().upper(),
-                        "cours": cours,
+                        "cours": c,
                         "solde": None,
-                        "brut": round(quantite * cours, 2),
-                        "frais": frais,
+                        "brut": round(q * c, 2),
+                        "frais": f,
                         "montant": montant,
-                        "source": "Manuel",
+                        "source": "Manuel PER",
                     })
-                    st.success(f"{m_type} ajouté ({quantite:.4f} parts)")
+                    st.success(f"{m_type} PER ajouté")
                 else:
                     st.error("ISIN, Quantité et Cours obligatoires")
 
     if st.session_state["per_manual"]:
-        st.caption(f"{len(st.session_state['per_manual'])} opération(s) PER manuelle(s)")
-        if st.button("🗑️ Vider opérations PER manuelles"):
+        st.caption(f"{len(st.session_state['per_manual'])} op. PER manuelle(s)")
+        if st.button("🗑️ Vider PER manuelles"):
             st.session_state["per_manual"] = []
+            st.rerun()
+
+    # —— Cours manuels OPCVM ——
+    st.subheader("Cours manuels (OPCVM)")
+    with st.expander("Forcer un cours par ISIN"):
+        force_isin = st.text_input("ISIN", key="force_isin")
+        force_cours = st.number_input("Cours (€)", min_value=0.0, format="%.4f", key="force_cours")
+        if st.button("Enregistrer le cours") and force_isin and force_cours > 0:
+            st.session_state["manual_prices"][force_isin.strip().upper()] = float(force_cours)
+            st.success(f"{force_isin} → {force_cours:.4f} €")
+
+    if st.session_state["manual_prices"]:
+        for isin, px in st.session_state["manual_prices"].items():
+            st.text(f"{isin} : {px:.4f} €")
+        if st.button("Vider les cours manuels"):
+            st.session_state["manual_prices"] = {}
             st.rerun()
 
     mode = st.radio(
         "Mode d'affichage",
-        ["PEA", "PER", "CTO", "Cumul total PEA+PER+CTO"],
+        ["PEA", "PER", "CTO", "Cumul PEA + PER", "Cumul total (PEA+PER+CTO)"],
     )
 
     st.markdown("---")
@@ -528,9 +579,10 @@ try:
             tx = extract_transaction_from_pdf(f)
             if tx:
                 pea_transactions.append(tx)
+    pea_transactions.extend(st.session_state["pea_manual"])
     pea_df, pea_by_isin = process_transactions(pea_transactions)
 
-    # CTO (Trade Republic en priorité, sinon CIC)
+    # CTO
     cto_transactions = []
     if cto_files:
         for f in cto_files:
@@ -548,7 +600,7 @@ try:
     per_transactions.extend(st.session_state["per_manual"])
     per_df, per_by_isin = process_transactions(per_transactions)
 
-    # Sélection du mode
+    # Mode
     if mode == "PEA":
         transactions, df, by_isin = pea_transactions, pea_df, pea_by_isin
         key = f"pea_{len(pea_transactions)}"
@@ -558,10 +610,10 @@ try:
     elif mode == "CTO":
         transactions, df, by_isin = cto_transactions, cto_df, cto_by_isin
         key = f"cto_{len(cto_transactions)}"
-    #elif mode == "Cumul PEA + PER":
-    #    transactions = pea_transactions + per_transactions
-    #    df, by_isin = process_transactions(transactions)
-    #    key = f"pea_per_{len(pea_transactions)}_{len(per_transactions)}"
+    elif mode == "Cumul PEA + PER":
+        transactions = pea_transactions + per_transactions
+        df, by_isin = process_transactions(transactions)
+        key = f"pea_per_{len(pea_transactions)}_{len(per_transactions)}"
     else:
         transactions = pea_transactions + per_transactions + cto_transactions
         df, by_isin = process_transactions(transactions)
@@ -569,12 +621,17 @@ try:
 
     if not transactions:
         st.warning("Aucune opération chargée.")
-        st.info("Dépose des PDF PEA/CTO ou un CSV / saisie manuelle pour le PER.")
+        st.info("Dépose des PDF PEA/CTO, un CSV PER, ou utilise la saisie manuelle.")
         st.stop()
 
     # Valorisation
     isins = tuple(by_isin.keys())
     current_prices = get_current_prices(isins)
+
+    # Cours manuels prioritaires
+    for isin, px in st.session_state.get("manual_prices", {}).items():
+        current_prices[isin] = {"price": px, "date": datetime.now().date()}
+
     summary_df = build_summary(by_isin, current_prices)
 
     total_investi = summary_df["Investi (€)"].sum() if not summary_df.empty else 0
@@ -592,7 +649,7 @@ try:
     invested_cumul = hist["invested_cumul"]
     parts_history = hist["parts_history"]
 
-    # ─── Affichage ───
+    # Affichage
     st.subheader(f"Portefeuille : {mode}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Capital investi", f"{total_investi:,.2f} €")
