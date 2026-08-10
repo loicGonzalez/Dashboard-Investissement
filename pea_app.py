@@ -47,7 +47,18 @@ def parse_fr_number(s):
     if s is None or (isinstance(s, float) and pd.isna(s)):
         return None
     try:
-        return float(str(s).strip().replace(" ", "").replace(",", "."))
+        t = str(s).strip().replace(" ", "").replace("\u00a0", "")
+        # "1.716,90" (FR) ou "1,716.90" (US) ou "1716.90"
+        if t.count(",") == 1 and t.count(".") >= 1:
+            if t.rfind(",") > t.rfind("."):
+                t = t.replace(".", "").replace(",", ".")  # FR
+            else:
+                t = t.replace(",", "")  # US thousands
+        elif t.count(",") == 1 and t.count(".") == 0:
+            t = t.replace(",", ".")
+        else:
+            t = t.replace(",", "")
+        return float(t)
     except Exception:
         return None
 
@@ -213,6 +224,7 @@ def extract_transaction_from_traderepublic(pdf_file):
 # CSV (PEA / PER)
 # ─────────────────────────────────────────────
 def parse_csv_transactions(uploaded_file) -> list:
+    """Parse CSV UC/ETF (ACHAT/VENTE) et fonds euros (VERSEMENT/RETRAIT/INTERETS)."""
     try:
         df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
     except Exception:
@@ -223,16 +235,13 @@ def parse_csv_transactions(uploaded_file) -> list:
             uploaded_file.seek(0)
             df = pd.read_csv(uploaded_file, sep=",", encoding="utf-8")
 
-    df.columns = [
-        str(c).replace("\ufeff", "").strip().lower()
-        for c in df.columns
-    ]
+    df.columns = [str(c).replace("\ufeff", "").strip().lower() for c in df.columns]
 
-    if not {"date", "quantite", "isin"}.issubset(set(df.columns)):
-        st.error(
-            f"Colonnes obligatoires manquantes : date, quantite, isin\n"
-            f"Colonnes trouvées : {list(df.columns)}"
-        )
+    if "debit" in df.columns and "montant" not in df.columns:
+        df = df.rename(columns={"debit": "montant"})
+
+    if "date" not in df.columns:
+        st.error(f"Colonne date manquante. Colonnes: {list(df.columns)}")
         return []
 
     transactions = []
@@ -251,20 +260,63 @@ def parse_csv_transactions(uploaded_file) -> list:
             else:
                 date = pd.to_datetime(date_val).to_pydatetime()
 
-            quantite = float(row["quantite"])
-            isin = str(row["isin"]).strip().upper()
+            typ = str(row.get("type", "ACHAT") or "ACHAT").strip().upper()
             nom = str(row.get("nom", "") or "").strip() or None
+            isin_raw = row.get("isin", "")
+            isin = (
+                str(isin_raw).strip().upper()
+                if pd.notna(isin_raw) and str(isin_raw).strip()
+                else None
+            )
             cours = parse_fr_number(row.get("cours"))
             frais = parse_fr_number(row.get("frais")) or 0.0
-            montant = parse_fr_number(row.get("debit") or row.get("montant"))
-            if montant is None and cours is not None:
-                montant = round(quantite * cours + frais, 2)
-            if montant is None or quantite <= 0:
+            montant = parse_fr_number(row.get("montant") if "montant" in row.index else None)
+            if montant is None:
+                montant = parse_fr_number(row.get("debit") if "debit" in row.index else None)
+            quantite = parse_fr_number(row.get("quantite") if "quantite" in row.index else None)
+
+            # Fonds euros
+            if typ in ("VERSEMENT", "RETRAIT", "INTERETS", "FRAIS_FE"):
+                if montant is None or montant <= 0:
+                    continue
+                fid = isin or (
+                    "FE_" + "".join(ch for ch in (nom or "DEFAULT").upper() if ch.isalnum())[:20]
+                )
+                transactions.append({
+                    "date": date,
+                    "type": typ,
+                    "quantite": None,
+                    "valeur": nom or "Fonds euros",
+                    "isin": fid,
+                    "cours": None,
+                    "solde": None,
+                    "brut": None,
+                    "frais": frais,
+                    "montant": montant,
+                    "source": "CSV",
+                    "kind": "fonds_euros",
+                    "no_cash": typ == "FRAIS_FE",
+                })
                 continue
 
-            typ = str(row.get("type", "ACHAT")).strip().upper()
+            # Frais UC = vente sans cash
+            no_cash = False
+            if typ == "FRAIS":
+                typ = "VENTE"
+                no_cash = True
+
             if typ not in ("ACHAT", "VENTE"):
                 typ = "ACHAT"
+
+            if quantite is None or quantite <= 0:
+                continue
+            if montant is None and cours is not None:
+                montant = round(quantite * cours + frais, 2)
+            if montant is None:
+                continue
+
+            if not isin:
+                isin = "ID_" + "".join(ch for ch in (nom or "UNKNOWN").upper() if ch.isalnum())[:14]
 
             transactions.append({
                 "date": date,
@@ -278,16 +330,41 @@ def parse_csv_transactions(uploaded_file) -> list:
                 "frais": frais,
                 "montant": montant,
                 "source": "CSV",
+                "kind": "uc",
+                "no_cash": no_cash,
             })
         except Exception:
             continue
     return transactions
 
 
+def split_uc_and_fe(transactions: list):
+    uc = [t for t in transactions if t.get("kind") != "fonds_euros"]
+    fe = [t for t in transactions if t.get("kind") == "fonds_euros"]
+    return uc, fe
 
-# ─────────────────────────────────────────────
-# Traitement commun (ACHAT / VENTE + float)
-# ─────────────────────────────────────────────
+
+def process_fonds_euros(ops: list) -> dict:
+    by_id = defaultdict(lambda: {
+        "name": "", "verse": 0.0, "retire": 0.0, "interets": 0.0, "ops": []
+    })
+    for op in sorted(ops, key=lambda x: x["date"]):
+        fid = op["isin"]
+        by_id[fid]["name"] = op.get("valeur") or fid
+        m = float(op["montant"])
+        if op["type"] == "VERSEMENT":
+            by_id[fid]["verse"] += m
+        elif op["type"] in ("RETRAIT", "FRAIS_FE"):
+            by_id[fid]["retire"] += m
+        elif op["type"] == "INTERETS":
+            by_id[fid]["interets"] += m
+        by_id[fid]["ops"].append(op)
+    for fid, v in by_id.items():
+        v["apports"] = v["verse"] - v["retire"]
+        v["valo"] = v["apports"] + v["interets"]
+    return dict(by_id)
+
+
 def process_transactions(transactions: list):
     if not transactions:
         return pd.DataFrame(), {}
@@ -339,6 +416,7 @@ def compute_cash_and_contributions(transactions: list) -> dict:
     for op in ops:
         montant = float(op.get("montant") or 0.0)
         typ = op.get("type", "ACHAT").upper()
+        no_cash = bool(op.get("no_cash"))
 
         if typ == "ACHAT":
             total_achats += montant
@@ -347,8 +425,10 @@ def compute_cash_and_contributions(transactions: list) -> dict:
                 apports += -cash
                 cash = 0.0
         elif typ == "VENTE":
-            total_ventes += montant
-            cash += montant
+            # Frais de gestion (no_cash) : réduit les parts mais ne génère pas de cash
+            if not no_cash:
+                total_ventes += montant
+                cash += montant
 
     return {
         "apports": round(apports, 2),
@@ -591,12 +671,18 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.markdown("**Modèle CSV (PEA / PER)**")
+    st.markdown("**Modèle CSV PEA / PER**")
     st.code(
-        "date,quantite,isin,nom,cours,frais,montant,type\n"
-        "24/07/2025,0.0554,FR0013295490,CM-AM EUROPE VALUE,4960.36,0,274.80,ACHAT\n"
-        "15/07/2026,0.085,FR0013295490,CM-AM EUROPE VALUE,5891.19,0,500.75,VENTE",
+        "date,type,quantite,isin,nom,cours,frais,montant\n"
+        "01/11/2025,ACHAT,0.100484,,CM-AM ACTIONS MONDE RC,345.33,0,34.70\n"
+        "01/11/2025,VERSEMENT,,,Euro Retraite,,,40.00\n"
+        "15/06/2026,VENTE,0.100484,,CM-AM ACTIONS MONDE RC,360.00,0,36.17\n"
+        "18/07/2026,ACHAT,92.1281,FR0014003IY1,AMUNDI MSCI WORLD II,18.636,0,1716.90",
         language=None,
+    )
+    st.caption(
+        "Types : ACHAT / VENTE / FRAIS (UC) · VERSEMENT / RETRAIT / INTERETS / FRAIS_FE (fonds euros). "
+        "ISIN optionnel pour les OPCVM non cotés."
     )
 
 # ─────────────────────────────────────────────
@@ -625,12 +711,21 @@ try:
                 cto_transactions.append(tx)
     cto_df, cto_by_isin = process_transactions(cto_transactions)
 
-    # PER
-    per_transactions = []
+    per_fe_by_id = {}
+
+    # PER (UC/ETF + fonds euros)
+    per_raw = []
     if per_csv is not None:
-        per_transactions.extend(parse_csv_transactions(per_csv))
-    per_transactions.extend(st.session_state["per_manual"])
-    per_df, per_by_isin = process_transactions(per_transactions)
+        per_raw.extend(parse_csv_transactions(per_csv))
+    # saisie manuelle = UC
+    for m in st.session_state["per_manual"]:
+        m = dict(m)
+        m.setdefault("kind", "uc")
+        per_raw.append(m)
+    per_uc, per_fe_ops = split_uc_and_fe(per_raw)
+    per_df, per_by_isin = process_transactions(per_uc)
+    per_fe_by_id = process_fonds_euros(per_fe_ops)
+    per_transactions = per_uc  # pour historique UC
 
     # Mode
     if mode == "PEA":
@@ -669,6 +764,14 @@ try:
 
     flow = compute_cash_and_contributions(transactions)
 
+    # Fonds euros (PER uniquement, ou cumul si on affiche PER)
+    fe_by_id = {}
+    if mode in ("PER", "Cumul PEA + PER", "Cumul total (PEA+PER+CTO)"):
+        fe_by_id = per_fe_by_id
+    fe_apports = sum(v["apports"] for v in fe_by_id.values()) if fe_by_id else 0.0
+    fe_valo = sum(v["valo"] for v in fe_by_id.values()) if fe_by_id else 0.0
+    fe_interets = sum(v["interets"] for v in fe_by_id.values()) if fe_by_id else 0.0
+
     investi_ouvert = float(open_df["Investi (€)"].sum()) if not open_df.empty else 0.0
     valo_titres = float(open_df["Valorisation (€)"].sum()) if not open_df.empty else 0.0
     if pd.isna(investi_ouvert):
@@ -676,12 +779,12 @@ try:
     if pd.isna(valo_titres):
         valo_titres = 0.0
 
-    patrimoine = valo_titres + flow["cash"]
-    pv_totale = patrimoine - flow["apports"]
-    pct_totale = 100 * pv_totale / flow["apports"] if flow["apports"] else 0.0
+    apports_total = flow["apports"] + fe_apports
+    patrimoine = valo_titres + flow["cash"] + fe_valo
+    pv_totale = patrimoine - apports_total
+    pct_totale = 100 * pv_totale / apports_total if apports_total else 0.0
 
-    # compat anciens noms
-    total_investi = flow["apports"]
+    total_investi = apports_total
     total_valo = patrimoine
     total_pv = pv_totale
     total_pct = pct_totale
@@ -699,16 +802,20 @@ try:
     # Affichage
     st.subheader(f"Portefeuille : {mode}")
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Apports estimés", f"{flow['apports']:,.2f} €")
+    c1.metric("Apports estimés", f"{apports_total:,.2f} €")
     c2.metric("Cash estimé", f"{flow['cash']:,.2f} €")
     c3.metric("Valorisation titres", f"{valo_titres:,.2f} €")
     c4.metric("Patrimoine total", f"{patrimoine:,.2f} €")
     c5.metric("Plus-value totale", f"{pv_totale:+,.2f} €", f"{pct_totale:+.1f}%")
 
+    extra = ""
+    if fe_valo or fe_apports:
+        extra = f" — Fonds euros : valo {fe_valo:,.2f} € (apports {fe_apports:,.2f} €, intérêts {fe_interets:,.2f} €)"
     st.caption(
-        f"Investi (coût positions ouvertes) : {investi_ouvert:,.2f} € — "
-        f"Σ achats {flow['total_achats']:,.2f} € / Σ ventes {flow['total_ventes']:,.2f} € — "
-        f"{len(transactions)} opérations"
+        f"Investi UC (coût ouvert) : {investi_ouvert:,.2f} € — "
+        f"Σ achats UC {flow['total_achats']:,.2f} € / Σ ventes {flow['total_ventes']:,.2f} € — "
+        f"{len(transactions)} ops UC"
+        + extra
     )
 
     if not sold_df.empty:
@@ -795,6 +902,22 @@ try:
                     use_container_width=True,
                     hide_index=True,
                 )
+
+
+        if fe_by_id:
+            fe_rows = []
+            for fid, v in fe_by_id.items():
+                fe_rows.append({
+                    "ID": fid,
+                    "Nom": v["name"],
+                    "Versements (€)": round(v["verse"], 2),
+                    "Retraits (€)": round(v["retire"], 2),
+                    "Intérêts (€)": round(v["interets"], 2),
+                    "Apports nets (€)": round(v["apports"], 2),
+                    "Valorisation (€)": round(v["valo"], 2),
+                })
+            st.markdown("**Fonds euros**")
+            st.dataframe(pd.DataFrame(fe_rows), use_container_width=True, hide_index=True)
 
     with tab2:
         if not df.empty:
