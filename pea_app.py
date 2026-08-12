@@ -33,6 +33,7 @@ YAHOO_TICKERS = {
     "FR0013412020": "PAEEM.PA",     # Amundi PEA MSCI EM ESG
     "FR0014003IY1": "WLDC.MI",
     "FR0000120073": "AI.PA",        # Air Liquide
+    "FR0000051070": "MAU.PA",        # Maurel & Prom
     "IE00B5BMR087": "SXR8.DE",      # iShares Core S&P 500 Acc (EUR, Xetra)
     "IE00BMFKG444": "XNAS.DE",      # Xtrackers Nasdaq 100
     "AU000000EUR7": "PF8.F",        # European Lithium (EUR)
@@ -137,11 +138,90 @@ def extract_transaction_from_traderepublic(pdf_file):
         return None
 
     if "TRADE REPUBLIC" not in text.upper() and "CONFIRMATION DE L'INVESTISSEMENT" not in text.upper():
-        return None
+        # Autoriser aussi les documents BONUS
+        if "BONUS" not in text.upper():
+            return None
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
+    text_up = text.upper()
 
-    # Date
+    # ---------- BONUS / actions gratuites ----------
+    if "BONUS" in text_up:
+        # Date
+        date = None
+        for line in lines:
+            m = re.search(r"DATE\s+(\d{2})\.(\d{2})\.(\d{4})", line, re.IGNORECASE)
+            if m:
+                try:
+                    date = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                    break
+                except ValueError:
+                    pass
+            m = re.search(r"(\d{2})/(\d{2})/(\d{4})", line)
+            if m and date is None:
+                try:
+                    date = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                except ValueError:
+                    pass
+        if date is None:
+            date = datetime.now()
+
+        # ISIN
+        isin = None
+        m = re.search(r"\b([A-Z]{2}[A-Z0-9]{10})\b", text)
+        if m:
+            isin = m.group(1).upper()
+        if not isin:
+            return None
+
+        # Quantité : "0.141236 unit." ou "0,141236"
+        quantite = None
+        m = re.search(r"(\d+[.,]\d+)\s*unit", text, re.IGNORECASE)
+        if m:
+            quantite = parse_fr_number(m.group(1))
+        if quantite is None:
+            m = re.search(r"(\d+[.,]\d{4,})", text)
+            if m:
+                quantite = parse_fr_number(m.group(1))
+        if not quantite or quantite <= 0:
+            return None
+
+        # Nom
+        nom = isin
+        m = re.search(r"(?:TITRE|Crédit)\s+([A-Za-z0-9 &.\-]+)\s+" + re.escape(isin), text, re.IGNORECASE)
+        if m:
+            nom = m.group(1).strip()
+        else:
+            for line in lines:
+                if isin in line.replace(" ", ""):
+                    # "Air Liquide FR0000120073" ou lignes séparées
+                    pass
+            m = re.search(r"(Air Liquide|[A-Za-z][A-Za-z0-9 &.\-]{2,40})\s*\n?\s*" + re.escape(isin), text)
+            if m:
+                nom = m.group(1).strip()
+            elif "Air Liquide" in text:
+                nom = "Air Liquide"
+
+        return {
+            "date": date,
+            "type": "BONUS",  # traité comme ACHAT à coût 0
+            "quantite": quantite,
+            "valeur": nom,
+            "isin": isin,
+            "cours": 0.0,
+            "solde": None,
+            "brut": 0.0,
+            "frais": 0.0,
+            "montant": 0.0,
+            "source": "Trade Republic BONUS",
+            "kind": "uc",
+            "no_cash": True,
+        }
+
+    # ---------- Confirmation d'investissement classique ----------
+    if "TRADE REPUBLIC" not in text_up and "CONFIRMATION DE L'INVESTISSEMENT" not in text_up:
+        return None
+
     date = None
     for line in lines:
         m = re.search(r"le\s+(\d{2}/\d{2}/\d{4})", line)
@@ -161,7 +241,6 @@ def extract_transaction_from_traderepublic(pdf_file):
     if date is None:
         return None
 
-    # ISIN
     isin = None
     isin_line_idx = None
     for i, line in enumerate(lines):
@@ -173,20 +252,15 @@ def extract_transaction_from_traderepublic(pdf_file):
     if not isin:
         return None
 
-    # Ligne données : nom + quantité + cours + montant (juste avant ISIN)
-    # Ex: "Air Liquide 0,056753 176,20 EUR 10,00 EUR"
-    # Ex: "Core S&P 500 USD (Acc) 0,0816 612,74 EUR 50,00 EUR"
     nom, quantite, cours, montant_brut = None, None, None, None
     search_lines = []
     if isin_line_idx is not None and isin_line_idx > 0:
         search_lines.append(lines[isin_line_idx - 1])
-    # aussi chercher dans toutes les lignes POSITION
     for line in lines:
         if re.search(r"\d+,\d+\s+\d+[.,]\d+\s*EUR\s+\d+[.,]\d+\s*EUR", line):
             search_lines.append(line)
 
     for prev in search_lines:
-        # Quantité peut avoir beaucoup de décimales (0,056753)
         m = re.search(
             r"^(.+?)\s+(\d+,\d+|\d+\.\d+|\d+)\s+(\d+[.,]\d+)\s*EUR\s+(\d+[.,]\d+)\s*EUR\s*$",
             prev,
@@ -202,7 +276,6 @@ def extract_transaction_from_traderepublic(pdf_file):
     if not quantite or quantite <= 0:
         return None
 
-    # TTF / frais
     ttf = 0.0
     for line in lines:
         m = re.search(
@@ -214,7 +287,6 @@ def extract_transaction_from_traderepublic(pdf_file):
             ttf = parse_fr_number(m.group(1)) or 0.0
             break
 
-    # Total débité (prioritaire)
     total = None
     for line in lines:
         m = re.search(r"TOTAL\s+(-[\d,]+)\s*EUR", line, re.IGNORECASE)
@@ -223,7 +295,6 @@ def extract_transaction_from_traderepublic(pdf_file):
             break
     if total is None:
         for line in lines:
-            # ligne "TOTAL -10,04 EUR" déjà couverte ; sinon TOTAL positif
             m = re.search(r"^TOTAL\s+([\d,]+)\s*EUR", line, re.IGNORECASE)
             if m:
                 total = parse_fr_number(m.group(1))
@@ -414,8 +485,9 @@ def process_transactions(transactions: list):
         if t.get("valeur"):
             by_isin[isin]["name"] = str(t["valeur"]).split("(")[0].strip()
 
-        if typ == "ACHAT":
+        if typ in ("ACHAT", "BONUS"):
             by_isin[isin]["parts"] += qty
+            # BONUS (actions gratuites) : montant = 0 → dilue le PRU, n'augmente pas l'investi
             by_isin[isin]["investi"] += montant
         elif typ == "VENTE":
             if by_isin[isin]["parts"] > 0:
@@ -454,6 +526,8 @@ def compute_cash_and_contributions(transactions: list) -> dict:
             if cash < -1e-9:
                 apports += -cash
                 cash = 0.0
+        elif typ == "BONUS":
+            pass  # actions gratuites : pas de mouvement de cash
         elif typ == "VENTE":
             # Frais de gestion (no_cash) : réduit les parts mais ne génère pas de cash
             if not no_cash:
@@ -555,9 +629,9 @@ def build_history(by_isin: dict, transactions: list) -> dict:
             montant = op.get("montant") or op.get("debit") or 0.0
             typ = op.get("type", "ACHAT").upper()
 
-            if typ == "ACHAT":
+            if typ in ("ACHAT", "BONUS"):
                 running_parts += qty
-                running_cost += montant
+                running_cost += montant  # 0 si BONUS
             elif typ == "VENTE" and running_parts > 0:
                 cout_unitaire = running_cost / running_parts
                 running_cost = max(0.0, running_cost - cout_unitaire * qty)
