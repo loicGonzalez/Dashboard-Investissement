@@ -33,7 +33,7 @@ YAHOO_TICKERS = {
     "FR0013412020": "PAEEM.PA",     # Amundi PEA MSCI EM ESG
     "FR0014003IY1": "WLDC.MI",
     "FR0000120073": "AI.PA",        # Air Liquide
-    "IE00B5BMR087": "CSPX.L",       # iShares Core S&P 500
+    "IE00B5BMR087": "SXR8.DE",      # iShares Core S&P 500 Acc (EUR, Xetra)
     "IE00BMFKG444": "XNAS.DE",      # Xtrackers Nasdaq 100
     "AU000000EUR7": "PF8.F",        # European Lithium (EUR)
 }
@@ -141,6 +141,7 @@ def extract_transaction_from_traderepublic(pdf_file):
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
+    # Date
     date = None
     for line in lines:
         m = re.search(r"le\s+(\d{2}/\d{2}/\d{4})", line)
@@ -160,31 +161,60 @@ def extract_transaction_from_traderepublic(pdf_file):
     if date is None:
         return None
 
-    nom, quantite, cours, montant_brut, isin = None, None, None, None, None
+    # ISIN
+    isin = None
+    isin_line_idx = None
     for i, line in enumerate(lines):
-        isin_match = re.search(r"ISIN\s*[:\s]*([A-Z]{2}[A-Z0-9]{10})", line, re.IGNORECASE)
-        if isin_match:
-            isin = isin_match.group(1).upper()
-            if i > 0:
-                prev = lines[i - 1]
-                m = re.search(r"^(.+)\s+([\d,]+)\s+([\d,]+)\s*EUR\s+([\d,]+)\s*EUR$", prev)
-                if m:
-                    nom = m.group(1).strip()
-                    quantite = parse_fr_number(m.group(2))
-                    cours = parse_fr_number(m.group(3))
-                    montant_brut = parse_fr_number(m.group(4))
+        m = re.search(r"ISIN\s*[:\s]*([A-Z]{2}[A-Z0-9]{10})", line, re.IGNORECASE)
+        if m:
+            isin = m.group(1).upper()
+            isin_line_idx = i
             break
-
-    if not isin or quantite is None or quantite <= 0:
+    if not isin:
         return None
 
+    # Ligne données : nom + quantité + cours + montant (juste avant ISIN)
+    # Ex: "Air Liquide 0,056753 176,20 EUR 10,00 EUR"
+    # Ex: "Core S&P 500 USD (Acc) 0,0816 612,74 EUR 50,00 EUR"
+    nom, quantite, cours, montant_brut = None, None, None, None
+    search_lines = []
+    if isin_line_idx is not None and isin_line_idx > 0:
+        search_lines.append(lines[isin_line_idx - 1])
+    # aussi chercher dans toutes les lignes POSITION
+    for line in lines:
+        if re.search(r"\d+,\d+\s+\d+[.,]\d+\s*EUR\s+\d+[.,]\d+\s*EUR", line):
+            search_lines.append(line)
+
+    for prev in search_lines:
+        # Quantité peut avoir beaucoup de décimales (0,056753)
+        m = re.search(
+            r"^(.+?)\s+(\d+,\d+|\d+\.\d+|\d+)\s+(\d+[.,]\d+)\s*EUR\s+(\d+[.,]\d+)\s*EUR\s*$",
+            prev,
+        )
+        if m:
+            nom = m.group(1).strip()
+            quantite = parse_fr_number(m.group(2))
+            cours = parse_fr_number(m.group(3))
+            montant_brut = parse_fr_number(m.group(4))
+            if quantite and quantite > 0:
+                break
+
+    if not quantite or quantite <= 0:
+        return None
+
+    # TTF / frais
     ttf = 0.0
     for line in lines:
-        m = re.search(r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR", line, re.IGNORECASE)
+        m = re.search(
+            r"Taxe sur les transactions financières\s*-?([\d,]+)\s*EUR",
+            line,
+            re.IGNORECASE,
+        )
         if m:
             ttf = parse_fr_number(m.group(1)) or 0.0
             break
 
+    # Total débité (prioritaire)
     total = None
     for line in lines:
         m = re.search(r"TOTAL\s+(-[\d,]+)\s*EUR", line, re.IGNORECASE)
@@ -193,12 +223,13 @@ def extract_transaction_from_traderepublic(pdf_file):
             break
     if total is None:
         for line in lines:
-            m = re.search(r"TOTAL\s+([\d,]+)\s*EUR", line, re.IGNORECASE)
+            # ligne "TOTAL -10,04 EUR" déjà couverte ; sinon TOTAL positif
+            m = re.search(r"^TOTAL\s+([\d,]+)\s*EUR", line, re.IGNORECASE)
             if m:
                 total = parse_fr_number(m.group(1))
                 break
 
-    if total is not None:
+    if total is not None and total > 0:
         montant = total
     elif montant_brut is not None:
         montant = round(montant_brut + ttf, 2)
@@ -217,12 +248,11 @@ def extract_transaction_from_traderepublic(pdf_file):
         "frais": ttf,
         "montant": montant,
         "source": "Trade Republic",
+        "kind": "uc",
     }
 
 
-# ─────────────────────────────────────────────
-# CSV (PEA / PER)
-# ─────────────────────────────────────────────
+
 def parse_csv_transactions(uploaded_file) -> list:
     """Parse CSV UC/ETF (ACHAT/VENTE) et fonds euros (VERSEMENT/RETRAIT/INTERETS)."""
     try:
