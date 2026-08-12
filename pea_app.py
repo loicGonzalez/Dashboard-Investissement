@@ -600,8 +600,17 @@ def get_historical_prices(ticker: str, start: datetime, end: datetime):
 
 
 def build_history(by_isin: dict, transactions: list) -> dict:
+    """
+    Historique investi + valorisation.
+    - Investi : TOUS les supports (OPCVM inclus), dès le 1er ordre.
+    - Valorisation : Yahoo si ticker dispo, sinon dernier cours connu des opérations (ffill).
+    """
     if not transactions:
-        return {"portfolio_value": pd.Series(dtype=float), "invested_cumul": pd.Series(dtype=float), "parts_history": {}}
+        return {
+            "portfolio_value": pd.Series(dtype=float),
+            "invested_cumul": pd.Series(dtype=float),
+            "parts_history": {},
+        }
 
     start_date = min(t["date"] for t in transactions) - timedelta(days=3)
     end_date = datetime.now()
@@ -612,26 +621,22 @@ def build_history(by_isin: dict, transactions: list) -> dict:
     parts_history = {}
 
     for isin, v in by_isin.items():
-        ticker = YAHOO_TICKERS.get(isin)
-        if not ticker:
-            continue
-        prices = get_historical_prices(ticker, start_date, end_date)
-        if prices.empty:
-            continue
-
         parts_series = pd.Series(0.0, index=all_dates)
         cost_series = pd.Series(0.0, index=all_dates)
+        # Série de cours « locaux » construite à partir des ops (pour OPCVM sans Yahoo)
+        local_price = pd.Series(index=all_dates, dtype=float)
         running_parts = 0.0
         running_cost = 0.0
 
         for op in sorted(v["ops"], key=lambda x: x["date"]):
-            qty = float(op["quantite"])
-            montant = op.get("montant") or op.get("debit") or 0.0
+            qty = float(op.get("quantite") or 0)
+            montant = float(op.get("montant") or op.get("debit") or 0.0)
             typ = op.get("type", "ACHAT").upper()
+            cours_op = op.get("cours")
 
             if typ in ("ACHAT", "BONUS"):
                 running_parts += qty
-                running_cost += montant  # 0 si BONUS
+                running_cost += montant
             elif typ == "VENTE" and running_parts > 0:
                 cout_unitaire = running_cost / running_parts
                 running_cost = max(0.0, running_cost - cout_unitaire * qty)
@@ -641,10 +646,27 @@ def build_history(by_isin: dict, transactions: list) -> dict:
             parts_series.loc[mask] = running_parts
             cost_series.loc[mask] = running_cost
 
-        prices = prices.reindex(all_dates).ffill()
-        portfolio_value += (parts_series * prices).fillna(0)
+            # Enregistre le cours de l'opération pour fallback valorisation
+            if cours_op and float(cours_op) > 0:
+                local_price.loc[mask] = float(cours_op)
+
+        # Toujours ajouter le coût de revient (OPCVM inclus)
         invested_cumul += cost_series
         parts_history[isin] = parts_series
+
+        # Prix de marché
+        ticker = YAHOO_TICKERS.get(isin)
+        prices = pd.Series(dtype=float)
+        if ticker:
+            prices = get_historical_prices(ticker, start_date, end_date)
+
+        if not prices.empty:
+            prices = prices.reindex(all_dates).ffill()
+            portfolio_value += (parts_series * prices).fillna(0)
+        else:
+            # Fallback : dernier cours connu des opérations (constant entre ops)
+            local_price = local_price.ffill()
+            portfolio_value += (parts_series * local_price).fillna(0)
 
     return {
         "portfolio_value": portfolio_value,
