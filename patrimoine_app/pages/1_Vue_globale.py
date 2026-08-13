@@ -8,6 +8,7 @@ import streamlit as st
 from core.state import init_session, rebuild_portfolios, enrich, metrics_for, get_history
 from core.style import inject_css, kpi_card, fmt_eur, PLOTLY_LAYOUT
 from core.config import ENV_COLORS
+from core.ui_detail import render_geo_section
 from core.portfolio import process_transactions
 
 st.set_page_config(page_title="Vue globale — Patrimoine", page_icon="◆", layout="wide")
@@ -208,3 +209,14 @@ if frames:
     st.dataframe(all_pos, use_container_width=True, hide_index=True)
 else:
     st.caption("Aucune position ouverte.")
+
+# Géo globale consolidée
+st.markdown("### Répartition géographique (tous comptes)")
+all_open_frames = []
+for info in (pea_i, per_i, cto_i):
+    o = info.get("open")
+    if o is not None and not o.empty:
+        all_open_frames.append(o)
+import pandas as pd
+all_open = pd.concat(all_open_frames, ignore_index=True) if all_open_frames else pd.DataFrame()
+render_geo_section(all_open, fe_valo=per_m.get("fe_valo", 0), title="Exposition par zone")

@@ -63,6 +63,10 @@ def render_envelope_detail(title, env_key, show_fe=False):
             st.markdown("**Fonds euros**")
             st.dataframe(pd.DataFrame(fe_rows), use_container_width=True, hide_index=True)
 
+        fe_v = sum(v["valo"] for v in (fe_by_id or {}).values()) if show_fe else 0.0
+        st.markdown("---")
+        render_geo_section(open_df, fe_valo=fe_v, title="Répartition géographique")
+
     with tab2:
         if df is not None and not df.empty:
             cols = [c for c in ["date_str", "type", "quantite", "isin", "valeur", "cours", "montant", "frais", "source"] if c in df.columns]
@@ -100,3 +104,52 @@ def render_envelope_detail(title, env_key, show_fe=False):
                 f"synthese_{env_key}.csv",
                 "text/csv",
             )
+
+
+def render_geo_section(open_df, fe_valo=0.0, title="Répartition géographique"):
+    """Donut + tableau geo à partir des positions ouvertes."""
+    import plotly.graph_objects as go
+    import streamlit as st
+    from core.geography import allocate_geo, geo_to_frame, ZONE_COLORS, ZONES
+    from core.style import PLOTLY_LAYOUT
+
+    if open_df is None or (hasattr(open_df, "empty") and open_df.empty):
+        if not fe_valo:
+            st.caption("Pas de positions pour la géographie.")
+            return
+        positions = []
+    else:
+        positions = open_df.to_dict("records")
+
+    geo = allocate_geo(positions, fe_valo=fe_valo)
+    if not geo:
+        st.caption("Aucune valorisation à ventiler.")
+        return
+
+    df = geo_to_frame(geo)
+    st.markdown(f"**{title}**")
+    c1, c2 = st.columns([1.1, 1])
+    with c1:
+        labels = list(geo.keys())
+        values = list(geo.values())
+        colors = [ZONE_COLORS.get(z, "#64748b") for z in labels]
+        fig = go.Figure(data=[go.Pie(
+            labels=labels, values=values, hole=0.55,
+            marker=dict(colors=colors),
+            textinfo="label+percent",
+            textfont=dict(size=11, color="#e5e7eb"),
+            hovertemplate="%{label}<br>%{value:,.0f} €<br>%{percent}<extra></extra>",
+        )])
+        total = sum(values)
+        fig.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False)
+        fig.add_annotation(
+            text=f"<b>{total:,.0f} €</b>".replace(",", " "),
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="#f9fafb"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(
+            "ETF Monde / EM : split indicatif type indice (pas un reporting émetteur exact)."
+        )
