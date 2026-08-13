@@ -26,7 +26,7 @@ if (
     rebuild_portfolios()
 
 st.sidebar.markdown("### ◆ Patrimoine")
-st.sidebar.caption("PEA · PER · CTO")
+st.sidebar.caption("PEA · PER · CTO · SQLite local")
 st.sidebar.markdown("---")
 st.sidebar.info("Utilise le menu de pages ci-dessus pour naviguer.")
 st.sidebar.markdown(

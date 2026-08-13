@@ -30,3 +30,12 @@ streamlit run streamlit_app.py
 1. Ouvre **Import** → charge tes fichiers → bouton *Charger / rafraîchir*
 2. Ouvre **Vue globale** pour la synthèse
 3. Zoom sur PEA, PER ou CTO si besoin
+
+
+## Base SQLite
+
+- Fichier : `data/patrimoine.db`
+- Créée automatiquement au premier import
+- Les opérations et cours manuels sont rechargés à chaque ouverture de l'app
+- Mode **Fusionner** : ignore les doublons
+- Mode **Remplacer** : réécrit l'enveloppe (CTO / PER CSV)
