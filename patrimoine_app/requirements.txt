@@ -5,5 +5,7 @@ yfinance
 plotly
 matplotlib
 requests
-cryptography
 python-dotenv
+
+# Optionnel — uniquement si tu actives Powens avec token chiffré :
+# cryptography

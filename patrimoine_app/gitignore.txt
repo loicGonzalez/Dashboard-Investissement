@@ -27,3 +27,5 @@ venv/
 
 # Streamlit
 .streamlit/secrets.toml
+
+secrets/powens_token.txt

@@ -59,14 +59,17 @@ def is_configured() -> bool:
 
 # ─── Chiffrement token (Fernet) ───────────────────────────────────────────
 
-def _fernet():
-    """Clé dérivée de POWENS_TOKEN_KEY ou générée une fois dans secrets/."""
+def _has_cryptography() -> bool:
     try:
-        from cryptography.fernet import Fernet
-    except ImportError as e:
-        raise RuntimeError(
-            "Installe cryptography : pip install cryptography"
-        ) from e
+        from cryptography.fernet import Fernet  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _fernet():
+    """Clé Fernet — optionnel (pip install cryptography)."""
+    from cryptography.fernet import Fernet
 
     key = os.environ.get("POWENS_TOKEN_KEY", "").strip()
     key_file = SECRETS_DIR / "powens_fernet.key"
@@ -85,29 +88,45 @@ def _fernet():
 
 
 def save_user_token(token: str, user_id: int | None = None) -> None:
+    """Sauve le token (chiffré si cryptography dispo, sinon fichier restreint)."""
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-    f = _fernet()
-    TOKEN_FILE.write_bytes(f.encrypt(token.encode("utf-8")))
+    meta = {"user_id": user_id, "saved_at": datetime.now().isoformat(timespec="seconds")}
+    TOKEN_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    if _has_cryptography():
+        f = _fernet()
+        TOKEN_FILE.write_bytes(f.encrypt(token.encode("utf-8")))
+    else:
+        # Fallback local sans crypto (machine perso uniquement)
+        plain = SECRETS_DIR / "powens_token.txt"
+        plain.write_text(token, encoding="utf-8")
+        try:
+            plain.chmod(0o600)
+        except OSError:
+            pass
+        return
     try:
         TOKEN_FILE.chmod(0o600)
     except OSError:
         pass
-    meta = {"user_id": user_id, "saved_at": datetime.now().isoformat(timespec="seconds")}
-    TOKEN_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
 def load_user_token() -> str | None:
-    if not TOKEN_FILE.exists():
-        return None
-    try:
-        f = _fernet()
-        return f.decrypt(TOKEN_FILE.read_bytes()).decode("utf-8")
-    except Exception:
-        return None
+    if _has_cryptography() and TOKEN_FILE.exists():
+        try:
+            return _fernet().decrypt(TOKEN_FILE.read_bytes()).decode("utf-8")
+        except Exception:
+            return None
+    plain = SECRETS_DIR / "powens_token.txt"
+    if plain.exists():
+        try:
+            return plain.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            return None
+    return None
 
 
 def clear_user_token() -> None:
-    for p in (TOKEN_FILE, TOKEN_META):
+    for p in (TOKEN_FILE, TOKEN_META, SECRETS_DIR / "powens_token.txt"):
         if p.exists():
             p.unlink()
 

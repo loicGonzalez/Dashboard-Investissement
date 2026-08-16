@@ -49,3 +49,15 @@ streamlit run streamlit_app.py
 4. Page **Import** → section Powens : Init user → Webview → Synchroniser
 
 **Ne jamais committer** : `.env`, `secrets/`, `data/*.db`
+
+
+## Lancer sur Mac (double-clic)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+chmod +x Lancer_Patrimoine.command
+```
+
+Ensuite double-clic sur `Lancer_Patrimoine.command` (détails dans `INSTALL_MAC.txt`).
