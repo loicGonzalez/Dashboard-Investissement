@@ -236,6 +236,106 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
         st.caption(line)
     st.rerun()
 
+
+
+st.markdown("---")
+st.markdown("### 🔗 Powens (agrégateur bancaire)")
+st.caption(
+    "Complément optionnel aux PDF/CSV. Snapshot de positions — le PRU reste mieux couvert par les avis d'opérés. "
+    "Secrets dans `.env` (voir `.env.example`)."
+)
+
+from core.connectors import powens as pw
+
+if not pw.is_configured():
+    st.warning(
+        "Powens non configuré. Copie `.env.example` → `.env` et renseigne "
+        "`POWENS_DOMAIN`, `POWENS_CLIENT_ID`, `POWENS_CLIENT_SECRET`."
+    )
+else:
+    token_ok = pw.load_user_token() is not None
+    st.write("Token local :", "✅ présent (chiffré)" if token_ok else "❌ absent")
+
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        if st.button("1. Init user Powens"):
+            try:
+                data = pw.init_user()
+                st.success(f"User créé / token sauvé (id={data.get('id') or data.get('id_user')})")
+            except Exception as e:
+                st.error(str(e))
+    with p2:
+        if st.button("2. Ouvrir Webview banque"):
+            try:
+                if not pw.load_user_token():
+                    pw.init_user()
+                url = pw.webview_connect_url()
+                st.markdown(f"[Ouvrir la connexion bancaire Powens]({url})")
+                st.info("Après consentement banque, reviens ici puis « Synchroniser ».")
+            except Exception as e:
+                st.error(str(e))
+    with p3:
+        if st.button("3. Synchroniser positions"):
+            try:
+                token = pw.load_user_token()
+                if not token:
+                    st.error("Pas de token — étape 1 d'abord")
+                else:
+                    for conn in pw.list_connections(token):
+                        cid = conn.get("id")
+                        if cid is not None:
+                            try:
+                                pw.sync_connection(cid, token)
+                            except Exception:
+                                pass
+                    invs = pw.list_investments(token)
+                    accounts = pw.list_accounts(token)
+                    st.session_state["powens_investments"] = invs
+                    st.session_state["powens_accounts"] = accounts
+                    st.success(f"{len(invs)} position(s), {len(accounts)} compte(s)")
+            except Exception as e:
+                st.error(str(e))
+    with p4:
+        if st.button("Révoquer token Powens"):
+            try:
+                pw.revoke_token()
+                st.warning("Token révoqué et effacé localement")
+            except Exception as e:
+                st.error(str(e))
+
+    invs = st.session_state.get("powens_investments") or []
+    if invs:
+        import pandas as pd
+        rows = []
+        for inv in invs:
+            rows.append({
+                "ISIN": inv.get("code") or inv.get("isin"),
+                "Label": inv.get("label") or inv.get("name"),
+                "Quantité": inv.get("quantity"),
+                "Cours": inv.get("unitvalue") or inv.get("unit_value"),
+                "Valo": inv.get("valuation") or inv.get("value"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        env_choice = st.selectbox(
+            "Importer le snapshot comme enveloppe",
+            ["PEA", "PER", "CTO"],
+            key="powens_env",
+        )
+        if st.button("Écrire snapshot dans SQLite (no_cash)"):
+            from core.state import persist_enveloppe, load_from_db, rebuild_portfolios
+            ops = pw.investments_to_snapshot_ops(invs, env_choice)
+            # Marquer source
+            for o in ops:
+                o["source"] = f"Powens snapshot {env_choice}"
+            ins, sk = persist_enveloppe(ops, env_choice, mode="merge")
+            st.session_state["histories"] = {}
+            st.session_state["db_loaded"] = False
+            load_from_db()
+            st.session_state["db_loaded"] = True
+            st.success(f"{ins} lignes insérées, {sk} doublons ignorés — enveloppe {env_choice}")
+            st.rerun()
+
 st.markdown("### Maintenance")
 m1, m2, m3 = st.columns(3)
 with m1:

@@ -46,6 +46,8 @@ def render_envelope_detail(title, env_key, show_fe=False):
     with tab1:
         if open_df is not None and not open_df.empty:
             st.markdown("**Positions ouvertes**")
+            if open_df is not None and not open_df.empty and open_df["Valorisation (€)"].isna().all():
+                st.warning("Cours Yahoo indisponibles : valo à 0. Vérifie la connexion internet / tickers, ou saisis un cours manuel (page Import). Le fallback dernier cours d'opération devrait s'appliquer au prochain refresh.")
             st.dataframe(open_df, use_container_width=True, hide_index=True)
         if sold_df is not None and not sold_df.empty:
             with st.expander(f"Positions soldées ({len(sold_df)})"):

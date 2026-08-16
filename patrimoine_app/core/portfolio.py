@@ -156,10 +156,13 @@ def build_history(by_isin: dict, transactions: list) -> dict:
         parts_history[isin] = parts_series
 
         # Prix de marché
-        ticker = YAHOO_TICKERS.get(isin)
+        raw = YAHOO_TICKERS.get(isin)
+        tickers = [raw] if isinstance(raw, str) else list(raw or [])
         prices = pd.Series(dtype=float)
-        if ticker:
+        for ticker in tickers:
             prices = get_historical_prices(ticker, start_date, end_date)
+            if not prices.empty:
+                break
 
         if not prices.empty:
             prices = prices.reindex(all_dates).ffill()

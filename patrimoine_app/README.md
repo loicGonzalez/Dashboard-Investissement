@@ -39,3 +39,13 @@ streamlit run streamlit_app.py
 - Les opérations et cours manuels sont rechargés à chaque ouverture de l'app
 - Mode **Fusionner** : ignore les doublons
 - Mode **Remplacer** : réécrit l'enveloppe (CTO / PER CSV)
+
+
+## Powens (optionnel)
+
+1. Créer un compte sandbox sur [powens.com](https://www.powens.com/)
+2. Copier `.env.example` → `.env` et renseigner domaine + client_id/secret
+3. `pip install requests cryptography`
+4. Page **Import** → section Powens : Init user → Webview → Synchroniser
+
+**Ne jamais committer** : `.env`, `secrets/`, `data/*.db`
