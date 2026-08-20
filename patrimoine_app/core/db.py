@@ -260,3 +260,44 @@ def get_meta(key: str, default: str | None = None, db_path: Path | None = None) 
 
 def file_content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
+
+
+def get_meta(key: str, default=None, db_path: Path | None = None):
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row["value"])
+        except Exception:
+            return row["value"]
+    finally:
+        conn.close()
+
+
+def set_meta(key: str, value, db_path: Path | None = None) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, json.dumps(value, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_allocation_targets(db_path: Path | None = None) -> dict:
+    """Cibles % par zone (somme idéalement 100)."""
+    from core.geography import DEFAULT_TARGETS
+    saved = get_meta("allocation_targets", None, db_path)
+    if isinstance(saved, dict) and saved:
+        return {k: float(v) for k, v in saved.items()}
+    return dict(DEFAULT_TARGETS)
+
+
+def save_allocation_targets(targets: dict, db_path: Path | None = None) -> None:
+    clean = {str(k): float(v) for k, v in targets.items() if float(v) >= 0}
+    set_meta("allocation_targets", clean, db_path)

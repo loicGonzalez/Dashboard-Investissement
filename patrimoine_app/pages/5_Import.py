@@ -336,6 +336,43 @@ else:
             st.success(f"{ins} lignes insérées, {sk} doublons ignorés — enveloppe {env_choice}")
             st.rerun()
 
+
+
+st.markdown("---")
+st.markdown("### 🎯 Cibles d'allocation géographique")
+st.caption("Utilisées sur Vue globale et chaque enveloppe (réel vs cible). Somme conseillée = 100 %.")
+try:
+    from core.db import get_allocation_targets, save_allocation_targets, init_db
+    from core.geography import ALLOC_ZONES, DEFAULT_TARGETS
+    init_db()
+    cur = get_allocation_targets()
+    with st.form("form_alloc_targets"):
+        cols = st.columns(len(ALLOC_ZONES))
+        new_t = {}
+        for col, z in zip(cols, ALLOC_ZONES):
+            with col:
+                new_t[z] = st.number_input(
+                    z, min_value=0.0, max_value=100.0,
+                    value=float(cur.get(z, DEFAULT_TARGETS.get(z, 0.0))),
+                    step=1.0, key=f"tgt_{z}",
+                )
+        total_t = sum(new_t.values())
+        st.caption(f"Somme des cibles : **{total_t:.1f} %**"
+                   + (" ✅" if abs(total_t - 100) < 0.5 else " ⚠️ idéalement 100 %"))
+        c_save, c_reset = st.columns(2)
+        save = c_save.form_submit_button("Enregistrer les cibles", type="primary")
+        reset = c_reset.form_submit_button("Réinitialiser défauts")
+        if save:
+            save_allocation_targets(new_t)
+            st.success("Cibles enregistrées en base locale")
+            st.rerun()
+        if reset:
+            save_allocation_targets(dict(DEFAULT_TARGETS))
+            st.success("Cibles remises aux valeurs par défaut")
+            st.rerun()
+except Exception as e:
+    st.warning(f"Cibles non disponibles : {e}")
+
 st.markdown("### Maintenance")
 m1, m2, m3 = st.columns(3)
 with m1:

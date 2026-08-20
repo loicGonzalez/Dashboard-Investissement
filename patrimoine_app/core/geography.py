@@ -21,6 +21,24 @@ ZONES = [
     "Non classé",
 ]
 
+# Zones pilotables (hors cash fonds euros / non classé)
+ALLOC_ZONES = [
+    "États-Unis",
+    "Europe",
+    "Asie-Pacifique",
+    "Émergents",
+    "Monde (autre)",
+]
+
+# Cibles par défaut (%). Ajustables dans l'UI / SQLite.
+DEFAULT_TARGETS = {
+    "États-Unis": 55.0,
+    "Europe": 25.0,
+    "Asie-Pacifique": 5.0,
+    "Émergents": 10.0,
+    "Monde (autre)": 5.0,
+}
+
 ZONE_COLORS = {
     "États-Unis": "#3b82f6",
     "Europe": "#8b5cf6",
@@ -151,4 +169,61 @@ def geo_to_frame(geo: dict):
     for z, v in geo.items():
         if z not in ZONES:
             rows.append({"Zone": z, "Valorisation (€)": v, "%": round(100 * v / total, 1)})
+    return pd.DataFrame(rows)
+
+
+def allocation_gap(geo: dict, targets: dict | None = None) -> "pd.DataFrame":
+    """
+    Compare allocation réelle (valo) vs cibles %.
+    Les zones Fonds euros / Non classé sont affichées en réel mais hors cible.
+    """
+    import pandas as pd
+    targets = targets or dict(DEFAULT_TARGETS)
+    # Réel hors FE / non classé pour calculer les % "investissables"
+    investable = {
+        z: v for z, v in geo.items()
+        if z not in ("Fonds euros", "Non classé") and v > 0
+    }
+    total_inv = sum(investable.values()) or 1.0
+    total_all = sum(geo.values()) or 1.0
+
+    rows = []
+    zones_order = list(ALLOC_ZONES)
+    for z in geo:
+        if z not in zones_order:
+            zones_order.append(z)
+
+    for z in zones_order:
+        real_eur = float(geo.get(z, 0.0) or 0.0)
+        if z in ("Fonds euros", "Non classé"):
+            real_pct = 100.0 * real_eur / total_all
+            rows.append({
+                "Zone": z,
+                "Réel (€)": round(real_eur, 2),
+                "Réel (%)": round(real_pct, 1),
+                "Cible (%)": None,
+                "Écart (pts)": None,
+                "Écart (€)": None,
+                "Statut": "hors cible",
+            })
+            continue
+        real_pct = 100.0 * real_eur / total_inv
+        tgt = float(targets.get(z, 0.0) or 0.0)
+        gap_pts = real_pct - tgt
+        gap_eur = real_eur - (tgt / 100.0) * total_inv
+        if abs(gap_pts) < 1.0:
+            statut = "OK"
+        elif gap_pts > 0:
+            statut = "Surpondéré"
+        else:
+            statut = "Sous-pondéré"
+        rows.append({
+            "Zone": z,
+            "Réel (€)": round(real_eur, 2),
+            "Réel (%)": round(real_pct, 1),
+            "Cible (%)": round(tgt, 1),
+            "Écart (pts)": round(gap_pts, 1),
+            "Écart (€)": round(gap_eur, 2),
+            "Statut": statut,
+        })
     return pd.DataFrame(rows)

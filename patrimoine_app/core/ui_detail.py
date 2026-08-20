@@ -207,3 +207,38 @@ def render_geo_section(open_df, fe_valo=0.0, title="Répartition géographique")
         st.caption(
             "ETF Monde / EM : split indicatif type indice (pas un reporting émetteur exact)."
         )
+
+    # —— Cibles d'allocation vs réel ——
+    try:
+        from core.db import get_allocation_targets
+        from core.geography import allocation_gap, ALLOC_ZONES, DEFAULT_TARGETS
+        targets = get_allocation_targets()
+        gap_df = allocation_gap(geo, targets)
+        st.markdown("**Allocation cible vs réelle**")
+        st.caption(
+            "Réel (%) sur la poche investie (hors fonds euros / non classé). "
+            "Écart (€) = surplus ou manque vs cible."
+        )
+        st.dataframe(gap_df, use_container_width=True, hide_index=True)
+
+        # Barres écart
+        plot_df = gap_df[gap_df["Cible (%)"].notna()].copy()
+        if not plot_df.empty:
+            import plotly.graph_objects as go
+            from core.style import PLOTLY_LAYOUT
+            fig_g = go.Figure()
+            fig_g.add_trace(go.Bar(
+                name="Réel %", x=plot_df["Zone"], y=plot_df["Réel (%)"],
+                marker_color="#3b82f6",
+            ))
+            fig_g.add_trace(go.Bar(
+                name="Cible %", x=plot_df["Zone"], y=plot_df["Cible (%)"],
+                marker_color="#64748b",
+            ))
+            fig_g.update_layout(
+                **PLOTLY_LAYOUT, barmode="group", height=300,
+                yaxis_title="%", xaxis_title=None,
+            )
+            st.plotly_chart(fig_g, use_container_width=True)
+    except Exception as e:
+        st.caption(f"Cibles d'allocation indisponibles : {e}")
