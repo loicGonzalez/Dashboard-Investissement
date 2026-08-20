@@ -16,6 +16,7 @@ from core.parsers import (
     extract_transaction_from_traderepublic,
     parse_csv_transactions,
 )
+from core.import_log import log_import_batch, load_journal, clear_journal, missing_price_alerts_from_open_df
 from core.db import (
     DB_PATH,
     count_operations,
@@ -141,7 +142,10 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
     # PEA PDF
     if pea_pdfs:
         pea_txs = []
+        failed_names = []
+        ok_names = []
         for f in pea_pdfs:
+            fname = getattr(f, "name", str(f))
             tx = extract_transaction_from_pdf(f)
             if tx is None:
                 tx = extract_transaction_from_traderepublic(f)
@@ -149,19 +153,22 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
                 tx.setdefault("kind", "uc")
                 pea_txs.append(tx)
                 n_ok += 1
+                ok_names.append(fname)
             else:
                 n_fail += 1
-        if mode_flag(pea_mode) == "replace":
-            # garder CSV PEA en DB : on ne wipe que si pas de csv dans ce batch
-            # simple: merge PDF always for PDF; replace only if radio replace on full PEA handled below
-            ins, sk = persist_enveloppe(pea_txs, "PEA", "merge")
-        else:
-            ins, sk = persist_enveloppe(pea_txs, "PEA", "merge")
+                failed_names.append(fname)
+        mflag = mode_flag(pea_mode)
+        ins, sk = persist_enveloppe(pea_txs, "PEA", "merge")
         st.session_state["pea_files_data"] = (
-            pea_txs if mode_flag(pea_mode) == "replace"
+            pea_txs if mflag == "replace"
             else st.session_state.get("pea_files_data", []) + pea_txs
         )
-        log.append(f"PEA PDF : {ins} insérées, {sk} doublons")
+        log.append(f"PEA PDF : {ins} insérées, {sk} doublons, {len(failed_names)} échecs parse")
+        log_import_batch(
+            enveloppe="PEA", source="PDF", files=ok_names + failed_names,
+            inserted=ins, duplicates=sk, failed=len(failed_names),
+            failed_files=failed_names, mode=mflag,
+        )
 
     # PEA CSV
     if pea_csv is not None:
@@ -169,19 +176,24 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
         for r in rows:
             r["source"] = r.get("source") or "CSV PEA"
         m = mode_flag(pea_mode)
-        if m == "replace":
-            # replace only CSV-tagged? simpler: merge CSV rows
-            ins, sk = persist_enveloppe(rows, "PEA", "merge")
-        else:
-            ins, sk = persist_enveloppe(rows, "PEA", "merge")
+        ins, sk = persist_enveloppe(rows, "PEA", "merge")
         st.session_state["pea_csv_data"] = rows
         n_ok += len(rows)
-        log.append(f"PEA CSV : {ins} insérées, {sk} doublons")
+        fname = getattr(pea_csv, "name", "pea.csv")
+        log.append(f"PEA CSV : {ins} insérées, {sk} doublons ({len(rows)} lignes lues)")
+        log_import_batch(
+            enveloppe="PEA", source="CSV", files=[fname],
+            inserted=ins, duplicates=sk, failed=0, mode=m,
+            extra=f"{len(rows)} lignes parsées",
+        )
 
     # CTO PDF
     if cto_pdfs:
         cto_txs = []
+        failed_names = []
+        ok_names = []
         for f in cto_pdfs:
+            fname = getattr(f, "name", str(f))
             tx = extract_transaction_from_traderepublic(f)
             if tx is None:
                 tx = extract_transaction_from_pdf(f)
@@ -189,15 +201,23 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
                 tx.setdefault("kind", "uc")
                 cto_txs.append(tx)
                 n_ok += 1
+                ok_names.append(fname)
             else:
                 n_fail += 1
-        if mode_flag(cto_mode) == "replace":
+                failed_names.append(fname)
+        mflag = mode_flag(cto_mode)
+        if mflag == "replace":
             ins, sk = persist_enveloppe(cto_txs, "CTO", "replace")
             st.session_state["cto_files_data"] = cto_txs
         else:
             ins, sk = persist_enveloppe(cto_txs, "CTO", "merge")
             st.session_state["cto_files_data"] = st.session_state.get("cto_files_data", []) + cto_txs
-        log.append(f"CTO PDF : {ins} insérées, {sk} doublons")
+        log.append(f"CTO PDF : {ins} insérées, {sk} doublons, {len(failed_names)} échecs parse")
+        log_import_batch(
+            enveloppe="CTO", source="PDF", files=ok_names + failed_names,
+            inserted=ins, duplicates=sk, failed=len(failed_names),
+            failed_files=failed_names, mode=mflag,
+        )
 
     # PER CSV
     if per_csv is not None:
@@ -220,6 +240,7 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
             ins, sk = persist_enveloppe(rows, "PER", "merge")
         st.session_state["per_csv_data"] = rows
         n_ok += len(rows)
+        log_import_batch(enveloppe="PER", source="CSV", files=[getattr(per_csv, "name", "per.csv")], inserted=ins, duplicates=sk, failed=0, mode="merge")
         log.append(f"PER CSV : {ins} insérées, {sk} doublons")
 
     save_manual_prices(st.session_state.get("manual_prices", {}))
@@ -239,6 +260,60 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
 
 
 st.markdown("---")
+
+
+st.markdown("---")
+st.markdown("### 📋 Journal d'import")
+st.caption("Historique des derniers imports (persisté en SQLite). Max 100 entrées.")
+jlog = load_journal()
+if jlog:
+    import pandas as pd
+    jrows = []
+    for e in jlog[:30]:
+        jrows.append({
+            "Date": e.get("ts"),
+            "Enveloppe": e.get("enveloppe"),
+            "Source": e.get("source"),
+            "Mode": e.get("mode"),
+            "Fichiers": e.get("n_files"),
+            "Insérées": e.get("inserted"),
+            "Doublons": e.get("duplicates"),
+            "Échecs parse": e.get("failed"),
+            "Fichiers en échec": ", ".join(e.get("failed_files") or [])[:80],
+            "Détail": e.get("extra") or "",
+        })
+    st.dataframe(pd.DataFrame(jrows), use_container_width=True, hide_index=True)
+    if st.button("Vider le journal d'import"):
+        clear_journal()
+        st.rerun()
+else:
+    st.caption("Aucune entrée pour l'instant — lance un import.")
+
+st.markdown("### ⚠️ Alertes cours manquants")
+st.caption("Positions ouvertes sans cours Yahoo ni fallback. Saisis un cours manuel ci-dessous ou vérifie le ticker.")
+_alerts = []
+for _key in ("pea", "per", "cto"):
+    _data = st.session_state.get(_key)
+    if not _data:
+        continue
+    _open = _data.get("open")
+    if _open is None:
+        # rebuild open via enrich if needed
+        try:
+            from core.state import enrich
+            _info = enrich(_data.get("by_isin") or {})
+            _open = _info.get("open")
+        except Exception:
+            _open = None
+    _alerts.extend(missing_price_alerts_from_open_df(_open))
+if _alerts:
+    import pandas as pd
+    st.warning(f"{len(_alerts)} position(s) sans cours de valorisation")
+    st.dataframe(pd.DataFrame(_alerts), use_container_width=True, hide_index=True)
+else:
+    st.success("Aucun cours manquant sur les positions ouvertes chargées.")
+
+
 st.markdown("### 🔗 Powens (agrégateur bancaire)")
 st.caption(
     "Complément optionnel aux PDF/CSV. Snapshot de positions — le PRU reste mieux couvert par les avis d'opérés. "

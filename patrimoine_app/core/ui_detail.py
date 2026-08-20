@@ -41,6 +41,20 @@ def render_envelope_detail(title, env_key, show_fe=False):
         positive=False,
     )
 
+    # Alertes cours manquants
+    try:
+        from core.import_log import missing_price_alerts_from_open_df
+        _ma = missing_price_alerts_from_open_df(open_df)
+        if _ma:
+            st.warning(
+                f"⚠️ {len(_ma)} position(s) sans cours : "
+                + ", ".join(f"{a.get('Nom') or a.get('ISIN')}" for a in _ma[:5])
+                + ("…" if len(_ma) > 5 else "")
+                + " — page Import → cours manuels."
+            )
+    except Exception:
+        pass
+
     tab1, tab2, tab3, tab4 = st.tabs(["Synthèse", "Opérations", "Évolution", "Export"])
 
     with tab1:

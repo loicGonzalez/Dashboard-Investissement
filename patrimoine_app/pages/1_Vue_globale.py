@@ -246,6 +246,23 @@ if frames:
 else:
     st.caption("Aucune position ouverte.")
 
+
+# Alertes consolidées cours manquants
+try:
+    from core.import_log import missing_price_alerts_from_open_df
+    _all_alerts = []
+    for _info in (pea_i, per_i, cto_i):
+        _all_alerts.extend(missing_price_alerts_from_open_df(_info.get("open")))
+    if _all_alerts:
+        st.warning(
+            f"⚠️ {len(_all_alerts)} position(s) sans cours de marché : "
+            + ", ".join(str(a.get("ISIN")) for a in _all_alerts[:8])
+            + " — corriger via Import → cours manuels."
+        )
+except Exception:
+    pass
+
+
 # Géo globale consolidée
 st.markdown("### Répartition géographique (tous comptes)")
 all_open_frames = []
