@@ -16,7 +16,7 @@ YAHOO_TICKERS = {
     # CTO — iShares Core S&P 500 (EUR)
     "IE00B5BMR087": ["SXR8.DE", "CSPX.L", "SXR8.MI"],
     # CTO — Nasdaq 100
-    "IE00BMFKG444": ["EXXT.DE", "EQQQ.DE", "CNDX.L", "XNAS.DE"],
+    "IE00BMFKG444": ["XNAS.DE", "XNAS.MI"],  # Xtrackers Nasdaq 100 — pas EQQQ
     # European Lithium
     "AU000000EUR7": ["PF8.F", "EUR.AX"],
 }

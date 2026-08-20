@@ -9,7 +9,7 @@ from core.state import init_session, rebuild_portfolios, enrich, metrics_for, ge
 from core.style import inject_css, kpi_card, fmt_eur, PLOTLY_LAYOUT
 from core.config import ENV_COLORS
 from core.ui_detail import render_geo_section
-from core.portfolio import process_transactions
+from core.portfolio import process_transactions, performance_periods
 
 st.set_page_config(page_title="Vue globale — Patrimoine", page_icon="◆", layout="wide")
 init_session()
@@ -127,6 +127,42 @@ with left:
         yaxis=dict(showgrid=True, gridcolor="#1f2937", zeroline=False, ticksuffix=" €"),
     )
     st.plotly_chart(fig, use_container_width=True)
+    if not pv.empty:
+        st.markdown("**Performance (valorisation)**")
+        st.markdown("**A · PV latente (aujourd’hui)**")
+        st.caption("Valorisation actuelle − coût de revient des positions ouvertes (consolidé).")
+        _inv_sum = _valo_sum = 0.0
+        for _info in (pea_i, per_i, cto_i):
+            _o = _info.get("open")
+            if _o is not None and not _o.empty:
+                _inv_sum += float(_o["Investi (€)"].fillna(0).sum())
+                _valo_sum += float(_o["Valorisation (€)"].fillna(0).sum())
+        _pv_lat = _valo_sum - _inv_sum
+        _pct_lat = 100 * _pv_lat / _inv_sum if _inv_sum else 0.0
+        _c1, _c2 = st.columns([1, 2])
+        kpi_card(_c1, "PV latente", fmt_eur(_pv_lat, signed=True), delta=f"{_pct_lat:+.1f}%", positive=_pv_lat >= 0)
+        with _c2:
+            st.markdown(
+                f"<div style='padding:12px 8px;color:#9ca3af;font-size:0.9rem'>"
+                f"Valo <b style='color:#e5e7eb'>{fmt_eur(_valo_sum)}</b> − Investi "
+                f"<b style='color:#e5e7eb'>{fmt_eur(_inv_sum)}</b></div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("**B · Perf hors apports (par période)**")
+        st.caption("(Δ valo − Δ investi) / valo début. Les versements ne comptent pas comme performance.")
+        rows = performance_periods(pv, inv)
+        pcs = st.columns(len(rows))
+        for col, row in zip(pcs, rows):
+            if not row["available"]:
+                kpi_card(col, row["label"], "—", sub="n/d")
+                continue
+            kpi_card(
+                col,
+                row["label"],
+                fmt_eur(row["delta_eur"], signed=True),
+                delta=f'{row["delta_pct"]:+.2f}%',
+                positive=row["delta_eur"] >= 0,
+            )
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right:

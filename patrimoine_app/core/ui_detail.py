@@ -75,10 +75,62 @@ def render_envelope_detail(title, env_key, show_fe=False):
             st.dataframe(df[cols], use_container_width=True, hide_index=True)
 
     with tab3:
+        from core.portfolio import performance_periods
+
         hist = get_history(f"{env_key}_{len(txs)}", by_isin, txs)
         pv = hist["portfolio_value"]
         inv = hist["invested_cumul"]
         if not pv.empty:
+            # —— Bloc A : PV latente (alignée KPI) ——
+            st.markdown("**A · PV latente (aujourd’hui)**")
+            st.caption(
+                "Valorisation actuelle − coût de revient des positions encore ouvertes "
+                "(même base que le KPI Plus-value)."
+            )
+            c_pv, c_detail = st.columns([1, 2])
+            pv_latente = m["valo_titres"] - m["investi_ouvert"]
+            pct_lat = (100 * pv_latente / m["investi_ouvert"]) if m["investi_ouvert"] else 0.0
+            kpi_card(
+                c_pv,
+                "PV latente",
+                fmt_eur(pv_latente, signed=True),
+                delta=f"{pct_lat:+.1f}%",
+                positive=pv_latente >= 0,
+            )
+            with c_detail:
+                st.markdown(
+                    f"<div style='padding:12px 8px;color:#9ca3af;font-size:0.9rem'>"
+                    f"Valo titres <b style='color:#e5e7eb'>{fmt_eur(m['valo_titres'])}</b>"
+                    f" &nbsp;−&nbsp; Investi ouvert "
+                    f"<b style='color:#e5e7eb'>{fmt_eur(m['investi_ouvert'])}</b>"
+                    f"<br/><span style='font-size:0.8rem'>"
+                    f"Le KPI « Plus-value » en tête = patrimoine − apports "
+                    f"(peut différer si cash / fonds euros)."
+                    f"</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("")
+            # —— Bloc B : perf par période ——
+            st.markdown("**B · Perf hors apports (par période)**")
+            st.caption(
+                "(Δ valo − Δ investi) / valo début de période. "
+                "Les versements ne comptent pas comme performance. Pas un TRI exact."
+            )
+            rows = performance_periods(pv, inv)
+            cols = st.columns(len(rows))
+            for col, row in zip(cols, rows):
+                if not row["available"]:
+                    kpi_card(col, row["label"], "—", sub="n/d")
+                    continue
+                kpi_card(
+                    col,
+                    row["label"],
+                    fmt_eur(row["delta_eur"], signed=True),
+                    delta=f'{row["delta_pct"]:+.2f}%',
+                    positive=row["delta_eur"] >= 0,
+                )
+            st.markdown("")
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=pv.index, y=pv, name="Valorisation",
