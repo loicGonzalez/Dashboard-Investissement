@@ -291,6 +291,67 @@ else:
 
 st.markdown("")
 
+# ——— Activité récente ———
+st.markdown("**Activité récente**")
+a1, a2 = st.columns(2)
+
+with a1:
+    st.markdown("**Dernières opérations**")
+    _ops = []
+    for _env, _txs in (("PEA", pea.get("txs") or []), ("PER", per.get("txs") or []), ("CTO", cto.get("txs") or [])):
+        for op in _txs:
+            d = op.get("date") or op.get("date_str") or ""
+            # normalize date for sort
+            ds = str(d)[:10]
+            if len(ds) == 10 and ds[2] == "/":
+                # dd/mm/yyyy
+                try:
+                    dd, mm, yy = ds.split("/")
+                    sort_key = f"{yy}-{mm}-{dd}"
+                except Exception:
+                    sort_key = ds
+            else:
+                sort_key = ds
+            _ops.append({
+                "_sort": sort_key,
+                "Date": ds,
+                "Env.": _env,
+                "Type": str(op.get("type") or "").upper(),
+                "Nom": str(op.get("valeur") or op.get("nom") or op.get("isin") or "")[:28],
+                "Qté": op.get("quantite"),
+                "Montant (€)": op.get("montant"),
+                "Source": str(op.get("source") or "")[:20],
+            })
+    if _ops:
+        _ops_df = pd.DataFrame(_ops).sort_values("_sort", ascending=False).head(10)
+        st.dataframe(
+            _ops_df.drop(columns=["_sort"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption("Aucune opération.")
+
+with a2:
+    st.markdown("**Derniers imports**")
+    _j = load_journal()
+    if _j:
+        _jrows = []
+        for e in _j[:8]:
+            _jrows.append({
+                "Date": e.get("ts"),
+                "Env.": e.get("enveloppe"),
+                "Source": e.get("source"),
+                "Insérées": e.get("inserted"),
+                "Doublons": e.get("duplicates"),
+                "Échecs": e.get("failed"),
+            })
+        st.dataframe(pd.DataFrame(_jrows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Aucun import dans le journal.")
+
+st.markdown("")
+
 # Charts
 left, right = st.columns([1.35, 1])
 

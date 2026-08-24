@@ -51,6 +51,7 @@ DONE
 
 La home devient un fil d’activité, pas seulement des totaux.
 
+DONE
 ---
 
 ### 6. Objectif patrimoine (optionnel)
