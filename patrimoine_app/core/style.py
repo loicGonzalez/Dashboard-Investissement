@@ -113,6 +113,27 @@ GLOBAL_CSS = """
         font-size: 0.75rem;
         font-weight: 600;
     }
+    .goal-wrap {
+        background: #151b24;
+        border: 1px solid #243041;
+        border-radius: 16px;
+        padding: 1rem 1.2rem;
+        margin: 0.5rem 0 1rem 0;
+    }
+    .goal-label { color: #9ca3af; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .goal-title { color: #f9fafb; font-weight: 650; font-size: 1.05rem; margin: 0.2rem 0 0.6rem 0; }
+    .goal-bar-bg {
+        background: #1f2937;
+        border-radius: 999px;
+        height: 12px;
+        overflow: hidden;
+    }
+    .goal-bar-fg {
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #3b82f6, #34d399);
+    }
+    .goal-meta { color: #9ca3af; font-size: 0.85rem; margin-top: 0.5rem; }
     .health-ok { color: #34d399; }
     .health-warn { color: #fbbf24; }
     .health-bad { color: #f87171; }

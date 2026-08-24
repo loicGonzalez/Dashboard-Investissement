@@ -61,6 +61,7 @@ DONE
 
 Motivation simple, sans sur-ingénierie.
 
+DONE
 ---
 
 ### 7. Empty state plus accueillant

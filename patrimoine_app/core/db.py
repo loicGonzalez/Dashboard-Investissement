@@ -339,3 +339,25 @@ def average_allocation_targets(weights: dict | None = None, db_path: Path | None
             s += float(t.get(z, DEFAULT_TARGETS.get(z, 0.0))) * w[e]
         out[z] = round(s / total_w, 2)
     return out
+
+
+def get_patrimoine_goal(db_path: Path | None = None) -> dict:
+    """Objectif patrimoine : {target_eur, monthly_apport_eur, label}."""
+    data = get_meta("patrimoine_goal", None, db_path)
+    if isinstance(data, dict):
+        return {
+            "target_eur": float(data.get("target_eur") or 0),
+            "monthly_apport_eur": float(data.get("monthly_apport_eur") or 0),
+            "label": str(data.get("label") or "Objectif patrimoine"),
+        }
+    return {"target_eur": 0.0, "monthly_apport_eur": 0.0, "label": "Objectif patrimoine"}
+
+
+def save_patrimoine_goal(target_eur: float, monthly_apport_eur: float = 0.0,
+                         label: str = "Objectif patrimoine",
+                         db_path: Path | None = None) -> None:
+    set_meta("patrimoine_goal", {
+        "target_eur": float(target_eur or 0),
+        "monthly_apport_eur": float(monthly_apport_eur or 0),
+        "label": label or "Objectif patrimoine",
+    }, db_path)

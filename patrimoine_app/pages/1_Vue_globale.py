@@ -207,6 +207,60 @@ page_map = {
 }
 color_map = {"PEA": "#60a5fa", "PER": "#a78bfa", "CTO": "#34d399"}
 
+# ——— Objectif patrimoine ———
+from core.db import get_patrimoine_goal, save_patrimoine_goal, init_db as _init_goal_db
+_init_goal_db()
+_goal = get_patrimoine_goal()
+with st.expander("🎯 Objectif patrimoine", expanded=bool(_goal.get("target_eur"))):
+    g1, g2, g3 = st.columns([1.2, 1, 1])
+    with g1:
+        _tgt = st.number_input(
+            "Objectif (€)",
+            min_value=0.0,
+            value=float(_goal.get("target_eur") or 0),
+            step=1000.0,
+            key="goal_target",
+        )
+    with g2:
+        _mensuel = st.number_input(
+            "Apport mensuel estimé (€)",
+            min_value=0.0,
+            value=float(_goal.get("monthly_apport_eur") or 0),
+            step=50.0,
+            key="goal_monthly",
+        )
+    with g3:
+        st.write("")
+        st.write("")
+        if st.button("Enregistrer l'objectif", key="save_goal"):
+            save_patrimoine_goal(_tgt, _mensuel)
+            st.success("Objectif enregistré")
+            st.rerun()
+
+    _disp_tgt = float(_goal.get("target_eur") or 0)
+    if _disp_tgt > 0:
+        _cur = float(tot_patrimoine)
+        _pct = min(100.0, 100.0 * _cur / _disp_tgt) if _disp_tgt else 0.0
+        _rest = max(0.0, _disp_tgt - _cur)
+        _mens = float(_goal.get("monthly_apport_eur") or 0)
+        if _mens > 0 and _rest > 0:
+            _months = _rest / _mens
+            _eta = "≈ {:.0f} mois au rythme de {:,.0f} €/mois".format(_months, _mens).replace(",", " ")
+        elif _rest <= 0:
+            _eta = "Objectif atteint"
+        else:
+            _eta = "Renseigne un apport mensuel pour estimer le délai"
+        _html = (
+            '<div class="goal-wrap">'
+            '<div class="goal-label">Progression</div>'
+            '<div class="goal-title">' + fmt_eur(_cur) + " / " + fmt_eur(_disp_tgt)
+            + " · {:.1f}%</div>".format(_pct)
+            + '<div class="goal-bar-bg"><div class="goal-bar-fg" style="width:{:.1f}%"></div></div>'.format(_pct)
+            + '<div class="goal-meta">Reste ' + fmt_eur(_rest) + " · " + _eta + "</div>"
+            + "</div>"
+        )
+        st.markdown(_html, unsafe_allow_html=True)
+
 st.markdown("**Enveloppes**")
 c_pea, c_per, c_cto = st.columns(3)
 for col, card in zip((c_pea, c_per, c_cto), cards):
