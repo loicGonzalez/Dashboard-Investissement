@@ -41,6 +41,7 @@ Petit tableau :
 
 Utile pour voir rapidement ce qui tire le portefeuille.
 
+DONE
 ---
 
 ### 5. Timeline & activité récente

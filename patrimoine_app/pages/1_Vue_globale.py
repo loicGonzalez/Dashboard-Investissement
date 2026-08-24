@@ -233,6 +233,64 @@ for col, card in zip((c_pea, c_per, c_cto), cards):
 
 st.markdown("")
 
+# ——— Top / flop positions (PV latente) ———
+st.markdown("**Top / flop positions**")
+st.caption("Plus-value latente = valorisation − investi (positions ouvertes, toutes enveloppes).")
+
+_pos_rows = []
+for _env_name, _info, _m in (
+    ("PEA", pea_i, pea_m),
+    ("PER", per_i, per_m),
+    ("CTO", cto_i, cto_m),
+):
+    _o = _info.get("open")
+    if _o is None or getattr(_o, "empty", True):
+        continue
+    for _, r in _o.iterrows():
+        try:
+            inv = float(r.get("Investi (€)") or 0)
+            valo = r.get("Valorisation (€)")
+            if valo is None or (isinstance(valo, float) and pd.isna(valo)):
+                continue
+            valo = float(valo)
+            pv = valo - inv
+            pct = (100 * pv / inv) if inv else 0.0
+            _pos_rows.append({
+                "Enveloppe": _env_name,
+                "Nom": str(r.get("Nom") or r.get("ISIN") or "")[:40],
+                "ISIN": r.get("ISIN"),
+                "PV latente (€)": round(pv, 2),
+                "PV %": round(pct, 2),
+                "Valo (€)": round(valo, 2),
+                "Investi (€)": round(inv, 2),
+            })
+        except (TypeError, ValueError):
+            continue
+
+if _pos_rows:
+    _pos_df = pd.DataFrame(_pos_rows)
+    _top = _pos_df.nlargest(3, "PV latente (€)")
+    _flop = _pos_df.nsmallest(3, "PV latente (€)")
+    c_top, c_flop = st.columns(2)
+    with c_top:
+        st.markdown("**Top 3** (meilleure PV latente)")
+        st.dataframe(
+            _top[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+    with c_flop:
+        st.markdown("**Flop 3** (moins bonne PV latente)")
+        st.dataframe(
+            _flop[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+else:
+    st.caption("Aucune position valorisée pour le classement.")
+
+st.markdown("")
+
 # Charts
 left, right = st.columns([1.35, 1])
 
