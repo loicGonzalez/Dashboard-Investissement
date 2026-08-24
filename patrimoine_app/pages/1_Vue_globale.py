@@ -51,10 +51,57 @@ tot_pv = tot_patrimoine - tot_apports
 tot_pct = 100 * tot_pv / tot_apports if tot_apports else 0.0
 tot_frais = pea_m.get("frais_achat", 0) + per_m.get("frais_achat", 0) + cto_m.get("frais_achat", 0)
 
-# Header
+# Historique léger pour scoreboard (1j / 1s)
+all_txs_sb = pea["txs"] + per["txs"] + cto["txs"]
+_, all_by_sb = process_transactions(all_txs_sb)
+hist_sb = get_history(f"global_sb_{len(all_txs_sb)}", all_by_sb, all_txs_sb)
+pv_sb = hist_sb.get("portfolio_value")
+inv_sb = hist_sb.get("invested_cumul")
+perf_sb = performance_periods(pv_sb, inv_sb) if pv_sb is not None else []
+perf_map = {r["label"]: r for r in perf_sb}
+
+def _chip_html(label, row):
+    if not row or not row.get("available"):
+        return f'<span class="chip-score chip-neutral">{label} · n/d</span>'
+    d = row["delta_eur"]
+    p = row["delta_pct"]
+    cls = "chip-pos" if d >= 0 else "chip-neg"
+    sign = "+" if d >= 0 else ""
+    txt = f"{label} · {sign}{d:,.0f} € ({p:+.2f}%)".replace(",", " ")
+    return f'<span class="chip-score {cls}">{txt}</span>'
+
+chip_1j = _chip_html("1j", perf_map.get("1 jour"))
+chip_1s = _chip_html("1s", perf_map.get("1 semaine"))
+
+# Dernier import
+from core.import_log import load_journal, missing_price_alerts_from_open_df
+journal = load_journal()
+if journal:
+    last = journal[0]
+    last_import_txt = f"{last.get('ts', '?')} · {last.get('enveloppe', '?')} · {last.get('source', '?')}"
+    last_fail = int(last.get("failed") or 0)
+else:
+    last_import_txt = "aucun import enregistré"
+    last_fail = 0
+
+# Santé : cours manquants
+_alerts_sb = []
+for _info in (pea_i, per_i, cto_i):
+    _alerts_sb.extend(missing_price_alerts_from_open_df(_info.get("open")))
+n_miss = len(_alerts_sb)
+
+# Cibles présentes ?
+from core.db import get_allocation_targets
+_tgt_ok = all(
+    abs(sum(get_allocation_targets(e).values()) - 100) < 5
+    for e in ("PEA", "PER", "CTO")
+)
+
+# Header + chips
 h1, h2 = st.columns([3, 1])
 with h1:
     st.markdown("## ◆ Patrimoine")
+    st.markdown(chip_1j + chip_1s, unsafe_allow_html=True)
     st.caption(f"Vue globale · {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 with h2:
     st.markdown(
@@ -64,6 +111,20 @@ with h2:
         '<span class="pill pill-cto">CTO</span></div>',
         unsafe_allow_html=True,
     )
+
+# Bandeau santé
+cls_cours = "health-ok" if n_miss == 0 else "health-bad"
+cls_imp = "health-ok" if last_fail == 0 else "health-warn"
+cls_tgt = "health-ok" if _tgt_ok else "health-warn"
+_health = (
+    '<div class="health-bar">'
+    f'<span class="{cls_cours}">{"✓" if n_miss == 0 else "⚠"} {n_miss} cours manquant{"s" if n_miss != 1 else ""}</span>'
+    f'<span class="{cls_imp}">{"✓" if last_fail == 0 else "⚠"} dernier import : {last_fail} échec{"s" if last_fail != 1 else ""} parse</span>'
+    f'<span class="{cls_tgt}">{"✓" if _tgt_ok else "⚠"} cibles allocation {"OK" if _tgt_ok else "à revoir (somme ≠ 100 %)"}</span>'
+    f'<span style="color:#6b7280;margin-left:auto;">Dernier import : {last_import_txt}</span>'
+    '</div>'
+)
+st.markdown(_health, unsafe_allow_html=True)
 
 k1, k2, k3, k4, k5 = st.columns(5)
 kpi_card(k1, "Apports estimés", fmt_eur(tot_apports))

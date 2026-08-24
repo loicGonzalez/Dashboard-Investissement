@@ -41,6 +41,38 @@ GLOBAL_CSS = """
         padding: 1.1rem 1.2rem 0.4rem 1.2rem;
         margin-bottom: 0.8rem;
     }
+    .chip-score {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        border: 1px solid #243041;
+        background: #151b24;
+        margin-right: 0.4rem;
+        margin-top: 0.25rem;
+    }
+    .chip-pos { color: #34d399; border-color: #065f46; background: #064e3b33; }
+    .chip-neg { color: #f87171; border-color: #7f1d1d; background: #7f1d1d33; }
+    .chip-neutral { color: #9ca3af; }
+    .health-bar {
+        background: #151b24;
+        border: 1px solid #243041;
+        border-radius: 12px;
+        padding: 0.65rem 1rem;
+        margin: 0.6rem 0 0.9rem 0;
+        font-size: 0.85rem;
+        color: #d1d5db;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        align-items: center;
+    }
+    .health-ok { color: #34d399; }
+    .health-warn { color: #fbbf24; }
+    .health-bad { color: #f87171; }
     .pill {
         display: inline-block;
         padding: 0.2rem 0.65rem;
