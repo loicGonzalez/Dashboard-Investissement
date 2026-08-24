@@ -10,6 +10,7 @@ Voici des idées **concrètes** pour enrichir la page d’accueil (**Vue globale
 | **Dernier import** (date + enveloppe) | Confiance dans la fraîcheur des données |
 | **Bandeau santé** | “3 cours manquants · 0 PDF en échec · cibles OK” |
 
+DONE
 ---
 
 ### 2. Cartes enveloppe cliquables

@@ -70,6 +70,49 @@ GLOBAL_CSS = """
         gap: 0.75rem 1.25rem;
         align-items: center;
     }
+    .env-card {
+        background: #151b24;
+        border: 1px solid #243041;
+        border-radius: 16px;
+        padding: 1rem 1.15rem 0.85rem 1.15rem;
+        height: 100%;
+        position: relative;
+    }
+    .env-card-title {
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 0.45rem;
+    }
+    .env-card-valo {
+        font-size: 1.45rem;
+        font-weight: 650;
+        color: #f9fafb;
+        line-height: 1.2;
+    }
+    .env-card-sub { color: #9ca3af; font-size: 0.82rem; margin-top: 0.35rem; }
+    .env-card-badge {
+        position: absolute;
+        top: 0.75rem;
+        right: 0.85rem;
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 999px;
+        background: #34d399;
+    }
+    .env-card-badge.warn { background: #fbbf24; }
+    .env-card-badge.bad { background: #f87171; }
+    .env-weight {
+        display: inline-block;
+        margin-top: 0.5rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        background: #1f2937;
+        color: #d1d5db;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
     .health-ok { color: #34d399; }
     .health-warn { color: #fbbf24; }
     .health-bad { color: #f87171; }

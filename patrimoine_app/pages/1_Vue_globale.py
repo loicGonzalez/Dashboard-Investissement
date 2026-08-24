@@ -148,6 +148,91 @@ kpi_card(
 
 st.markdown("")
 
+# ——— Cartes enveloppes PEA / PER / CTO ———
+from core.geography import allocation_gap, allocate_geo
+from core.db import get_allocation_targets
+
+def _env_card_data(name, m, open_df, fe_valo=0.0):
+    valo = (m.get("valo_titres") or 0) + (fe_valo or 0)
+    # PV latente titres
+    inv = m.get("investi_ouvert") or 0
+    pv_lat = (m.get("valo_titres") or 0) - inv
+    pct_lat = (100 * pv_lat / inv) if inv else 0.0
+    weight = (100 * valo / tot_patrimoine) if tot_patrimoine else 0.0
+    # alertes cours
+    n_miss = len(missing_price_alerts_from_open_df(open_df))
+    # écart allocation fort (> 5 pts sur une zone)
+    gap_strong = False
+    try:
+        positions = open_df.to_dict("records") if open_df is not None and not open_df.empty else []
+        geo = allocate_geo(positions, fe_valo=fe_valo)
+        gap_df = allocation_gap(geo, get_allocation_targets(name))
+        if gap_df is not None and not gap_df.empty and "Écart (pts)" in gap_df.columns:
+            for v in gap_df["Écart (pts)"].dropna():
+                if abs(float(v)) >= 5:
+                    gap_strong = True
+                    break
+    except Exception:
+        pass
+    if n_miss > 0:
+        badge = "bad"
+        badge_title = f"{n_miss} cours manquant(s)"
+    elif gap_strong:
+        badge = "warn"
+        badge_title = "Écart d'allocation ≥ 5 pts"
+    else:
+        badge = ""
+        badge_title = "OK"
+    return {
+        "name": name,
+        "valo": valo,
+        "pv_lat": pv_lat,
+        "pct_lat": pct_lat,
+        "weight": weight,
+        "badge": badge,
+        "badge_title": badge_title,
+        "n_miss": n_miss,
+        "cash": m.get("flow", {}).get("cash", 0) or 0,
+    }
+
+cards = [
+    _env_card_data("PEA", pea_m, pea_i.get("open")),
+    _env_card_data("PER", per_m, per_i.get("open"), fe_valo=per_m.get("fe_valo", 0)),
+    _env_card_data("CTO", cto_m, cto_i.get("open")),
+]
+page_map = {
+    "PEA": "pages/2_PEA.py",
+    "PER": "pages/3_PER.py",
+    "CTO": "pages/4_CTO.py",
+}
+color_map = {"PEA": "#60a5fa", "PER": "#a78bfa", "CTO": "#34d399"}
+
+st.markdown("**Enveloppes**")
+c_pea, c_per, c_cto = st.columns(3)
+for col, card in zip((c_pea, c_per, c_cto), cards):
+    with col:
+        badge_cls = f"env-card-badge {card['badge']}" if card["badge"] else "env-card-badge"
+        pv_color = "#34d399" if card["pv_lat"] >= 0 else "#f87171"
+        html = (
+            f'<div class="env-card" title="{card["badge_title"]}">'
+            f'<div class="{badge_cls}"></div>'
+            f'<div class="env-card-title" style="color:{color_map[card["name"]]}">{card["name"]}</div>'
+            f'<div class="env-card-valo">{fmt_eur(card["valo"])}</div>'
+            f'<div class="env-card-sub">PV latente '
+            f'<span style="color:{pv_color}">{fmt_eur(card["pv_lat"], signed=True)} '
+            f'({card["pct_lat"]:+.1f}%)</span></div>'
+            f'<span class="env-weight">{card["weight"]:.1f}% du patrimoine</span>'
+            f'</div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
+        # Lien navigation Streamlit
+        try:
+            st.page_link(page_map[card["name"]], label=f"Ouvrir {card['name']} →", icon="↗")
+        except Exception:
+            st.caption(f"Menu → {card['name']}")
+
+st.markdown("")
+
 # Charts
 left, right = st.columns([1.35, 1])
 
