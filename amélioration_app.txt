@@ -20,6 +20,7 @@ Trois mini-cartes **PEA / PER / CTO** :
 - pastille rouge si cours manquant ou écart d’allocation fort  
 - clic → page détail (déjà dans le menu, mais plus visible)
 
+DONE
 ---
 
 ### 3. Focus “écarts d’allocation” (actionnable)
@@ -29,6 +30,7 @@ Sur la vue globale uniquement :
 - montant € à réallouer (“il manque ~X € en Émergents”)  
 → transforme la géo en **to-do**, pas seulement un camembert
 
+DONE
 ---
 
 ### 4. Top / flop positions

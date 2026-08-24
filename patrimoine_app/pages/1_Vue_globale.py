@@ -419,6 +419,8 @@ for info in (pea_i, per_i, cto_i):
 import pandas as pd
 all_open = pd.concat(all_open_frames, ignore_index=True) if all_open_frames else pd.DataFrame()
 from core.db import average_allocation_targets, save_allocation_targets, get_allocation_targets
+from core.geography import allocate_geo, allocation_gap
+
 _weights = {
     "PEA": pea_m.get("valo_titres", 0) or 0,
     "PER": (per_m.get("valo_titres", 0) or 0) + (per_m.get("fe_valo", 0) or 0),
@@ -427,6 +429,70 @@ _weights = {
 _global_targets = average_allocation_targets(_weights)
 # mémorise la moyenne calculée pour affichage (non éditable ici)
 save_allocation_targets(_global_targets, "GLOBAL")
+
+# ——— Focus écarts d'allocation (actionnable) ———
+st.markdown("### À réallouer")
+st.caption(
+    "Écarts vs cibles globales (moyenne pondérée PEA/PER/CTO). "
+    "Montants indicatifs sur la poche investie hors fonds euros."
+)
+try:
+    _positions = all_open.to_dict("records") if all_open is not None and not all_open.empty else []
+    _geo = allocate_geo(_positions, fe_valo=per_m.get("fe_valo", 0) or 0)
+    _gap = allocation_gap(_geo, _global_targets)
+    if _gap is not None and not _gap.empty and "Écart (€)" in _gap.columns:
+        g = _gap[_gap["Cible (%)"].notna()].copy()
+        g["Écart abs"] = g["Écart (€)"].abs()
+        g = g[g["Écart abs"] >= 1]  # ignore micro-écarts
+        over = g[g["Écart (€)"] > 0].sort_values("Écart (€)", ascending=False).head(3)
+        under = g[g["Écart (€)"] < 0].sort_values("Écart (€)", ascending=True).head(3)
+
+        c_over, c_under = st.columns(2)
+        with c_over:
+            st.markdown("**Surpondéré** (réduire / vendre vers cible)")
+            if over.empty:
+                st.caption("Aucun écart significatif")
+            else:
+                for _, row in over.iterrows():
+                    st.markdown(
+                        f"- **{row['Zone']}** : "
+                        f"+{row['Écart (pts)']:.1f} pts · "
+                        f"**{row['Écart (€)']:,.0f} €** en trop"
+                        .replace(",", " ")
+                    )
+        with c_under:
+            st.markdown("**Sous-pondéré** (renforcer / acheter vers cible)")
+            if under.empty:
+                st.caption("Aucun écart significatif")
+            else:
+                for _, row in under.iterrows():
+                    st.markdown(
+                        f"- **{row['Zone']}** : "
+                        f"{row['Écart (pts)']:.1f} pts · "
+                        f"**{abs(row['Écart (€)']):,.0f} €** à ajouter"
+                        .replace(",", " ")
+                    )
+
+        # Synthèse one-liner
+        if not over.empty and not under.empty:
+            top_o = over.iloc[0]
+            top_u = under.iloc[0]
+            move = min(abs(float(top_o["Écart (€)"])), abs(float(top_u["Écart (€)"])))
+            if move >= 1:
+                st.info(
+                    f"Piste simple : déplacer environ **{move:,.0f} €** de "
+                    f"**{top_o['Zone']}** → **{top_u['Zone']}** "
+                    f"(ordre de grandeur, hors fiscalité / frais)."
+                    .replace(",", " ")
+                )
+        elif g.empty:
+            st.success("Allocation alignée sur les cibles (±1 €).")
+    else:
+        st.caption("Pas assez de données pour calculer les écarts.")
+except Exception as e:
+    st.caption(f"Écarts d'allocation indisponibles : {e}")
+
+st.markdown("")
 render_geo_section(
     all_open,
     fe_valo=per_m.get("fe_valo", 0),
