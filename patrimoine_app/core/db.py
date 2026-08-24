@@ -289,15 +289,53 @@ def set_meta(key: str, value, db_path: Path | None = None) -> None:
         conn.close()
 
 
-def get_allocation_targets(db_path: Path | None = None) -> dict:
-    """Cibles % par zone (somme idéalement 100)."""
+def get_allocation_targets(enveloppe: str = "GLOBAL", db_path: Path | None = None) -> dict:
+    """Cibles % par zone pour une enveloppe (PEA|PER|CTO|GLOBAL)."""
     from core.geography import DEFAULT_TARGETS
-    saved = get_meta("allocation_targets", None, db_path)
+    env = (enveloppe or "GLOBAL").upper()
+    all_saved = get_meta("allocation_targets_by_env", None, db_path)
+    if not isinstance(all_saved, dict):
+        # migration depuis l'ancienne clé unique
+        legacy = get_meta("allocation_targets", None, db_path)
+        if isinstance(legacy, dict) and legacy:
+            all_saved = {"PEA": legacy, "PER": legacy, "CTO": legacy, "GLOBAL": legacy}
+        else:
+            all_saved = {}
+    saved = all_saved.get(env)
     if isinstance(saved, dict) and saved:
         return {k: float(v) for k, v in saved.items()}
     return dict(DEFAULT_TARGETS)
 
 
-def save_allocation_targets(targets: dict, db_path: Path | None = None) -> None:
+def save_allocation_targets(targets: dict, enveloppe: str = "GLOBAL", db_path: Path | None = None) -> None:
+    env = (enveloppe or "GLOBAL").upper()
     clean = {str(k): float(v) for k, v in targets.items() if float(v) >= 0}
-    set_meta("allocation_targets", clean, db_path)
+    all_saved = get_meta("allocation_targets_by_env", None, db_path)
+    if not isinstance(all_saved, dict):
+        all_saved = {}
+    all_saved[env] = clean
+    set_meta("allocation_targets_by_env", all_saved, db_path)
+
+
+def average_allocation_targets(weights: dict | None = None, db_path: Path | None = None) -> dict:
+    """
+    Moyenne des cibles PEA/PER/CTO.
+    Si weights = {"PEA": valo, "PER": valo, "CTO": valo}, moyenne pondérée.
+    Sinon moyenne arithmétique simple.
+    """
+    from core.geography import ALLOC_ZONES, DEFAULT_TARGETS
+    envs = ["PEA", "PER", "CTO"]
+    targets_list = [(e, get_allocation_targets(e, db_path)) for e in envs]
+    if weights:
+        w = {e: max(0.0, float(weights.get(e, 0) or 0)) for e in envs}
+        total_w = sum(w.values()) or 1.0
+    else:
+        w = {e: 1.0 for e in envs}
+        total_w = 3.0
+    out = {}
+    for z in ALLOC_ZONES:
+        s = 0.0
+        for e, t in targets_list:
+            s += float(t.get(z, DEFAULT_TARGETS.get(z, 0.0))) * w[e]
+        out[z] = round(s / total_w, 2)
+    return out

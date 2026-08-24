@@ -1,1 +1,0 @@
-"""Connecteurs externes (Powens, etc.)."""

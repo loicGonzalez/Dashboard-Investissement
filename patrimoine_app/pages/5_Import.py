@@ -415,13 +415,23 @@ else:
 
 st.markdown("---")
 st.markdown("### 🎯 Cibles d'allocation géographique")
-st.caption("Utilisées sur Vue globale et chaque enveloppe (réel vs cible). Somme conseillée = 100 %.")
+st.caption(
+    "Une grille de cibles **par enveloppe** (PEA / PER / CTO). "
+    "La **Vue globale** utilise la **moyenne pondérée** par valorisation de chaque enveloppe."
+)
 try:
-    from core.db import get_allocation_targets, save_allocation_targets, init_db
+    from core.db import get_allocation_targets, save_allocation_targets, init_db, average_allocation_targets
     from core.geography import ALLOC_ZONES, DEFAULT_TARGETS
     init_db()
-    cur = get_allocation_targets()
+    env_sel = st.radio(
+        "Enveloppe à configurer",
+        ["PEA", "PER", "CTO"],
+        horizontal=True,
+        key="alloc_env_sel",
+    )
+    cur = get_allocation_targets(env_sel)
     with st.form("form_alloc_targets"):
+        st.markdown(f"**Cibles — {env_sel}**")
         cols = st.columns(len(ALLOC_ZONES))
         new_t = {}
         for col, z in zip(cols, ALLOC_ZONES):
@@ -429,22 +439,35 @@ try:
                 new_t[z] = st.number_input(
                     z, min_value=0.0, max_value=100.0,
                     value=float(cur.get(z, DEFAULT_TARGETS.get(z, 0.0))),
-                    step=1.0, key=f"tgt_{z}",
+                    step=1.0, key=f"tgt_{env_sel}_{z}",
                 )
         total_t = sum(new_t.values())
-        st.caption(f"Somme des cibles : **{total_t:.1f} %**"
-                   + (" ✅" if abs(total_t - 100) < 0.5 else " ⚠️ idéalement 100 %"))
-        c_save, c_reset = st.columns(2)
-        save = c_save.form_submit_button("Enregistrer les cibles", type="primary")
-        reset = c_reset.form_submit_button("Réinitialiser défauts")
+        st.caption(
+            f"Somme des cibles ({env_sel}) : **{total_t:.1f} %**"
+            + (" ✅" if abs(total_t - 100) < 0.5 else " ⚠️ idéalement 100 %")
+        )
+        c_save, c_reset, c_copy = st.columns(3)
+        save = c_save.form_submit_button(f"Enregistrer ({env_sel})", type="primary")
+        reset = c_reset.form_submit_button(f"Défauts → {env_sel}")
+        copy_all = c_copy.form_submit_button("Appliquer à PEA+PER+CTO")
         if save:
-            save_allocation_targets(new_t)
-            st.success("Cibles enregistrées en base locale")
+            save_allocation_targets(new_t, env_sel)
+            st.success(f"Cibles {env_sel} enregistrées")
             st.rerun()
         if reset:
-            save_allocation_targets(dict(DEFAULT_TARGETS))
-            st.success("Cibles remises aux valeurs par défaut")
+            save_allocation_targets(dict(DEFAULT_TARGETS), env_sel)
+            st.success(f"Cibles {env_sel} = valeurs par défaut")
             st.rerun()
+        if copy_all:
+            for e in ("PEA", "PER", "CTO"):
+                save_allocation_targets(new_t, e)
+            st.success("Mêmes cibles appliquées à PEA, PER et CTO")
+            st.rerun()
+    # Aperçu moyenne globale
+    with st.expander("Aperçu moyenne globale (pondération égale ici)"):
+        avg = average_allocation_targets()
+        st.json(avg)
+        st.caption("En Vue globale, la pondération suit la valorisation réelle de chaque enveloppe.")
 except Exception as e:
     st.warning(f"Cibles non disponibles : {e}")
 

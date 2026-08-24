@@ -272,4 +272,19 @@ for info in (pea_i, per_i, cto_i):
         all_open_frames.append(o)
 import pandas as pd
 all_open = pd.concat(all_open_frames, ignore_index=True) if all_open_frames else pd.DataFrame()
-render_geo_section(all_open, fe_valo=per_m.get("fe_valo", 0), title="Exposition par zone")
+from core.db import average_allocation_targets, save_allocation_targets, get_allocation_targets
+_weights = {
+    "PEA": pea_m.get("valo_titres", 0) or 0,
+    "PER": (per_m.get("valo_titres", 0) or 0) + (per_m.get("fe_valo", 0) or 0),
+    "CTO": cto_m.get("valo_titres", 0) or 0,
+}
+_global_targets = average_allocation_targets(_weights)
+# mémorise la moyenne calculée pour affichage (non éditable ici)
+save_allocation_targets(_global_targets, "GLOBAL")
+render_geo_section(
+    all_open,
+    fe_valo=per_m.get("fe_valo", 0),
+    title="Exposition par zone (cible = moyenne pondérée PEA/PER/CTO)",
+    enveloppe="GLOBAL",
+    targets=_global_targets,
+)

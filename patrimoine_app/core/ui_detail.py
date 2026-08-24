@@ -81,7 +81,7 @@ def render_envelope_detail(title, env_key, show_fe=False):
 
         fe_v = sum(v["valo"] for v in (fe_by_id or {}).values()) if show_fe else 0.0
         st.markdown("---")
-        render_geo_section(open_df, fe_valo=fe_v, title="Répartition géographique")
+        render_geo_section(open_df, fe_valo=fe_v, title="Répartition géographique", enveloppe=title)
 
     with tab2:
         if df is not None and not df.empty:
@@ -174,7 +174,7 @@ def render_envelope_detail(title, env_key, show_fe=False):
             )
 
 
-def render_geo_section(open_df, fe_valo=0.0, title="Répartition géographique"):
+def render_geo_section(open_df, fe_valo=0.0, title="Répartition géographique", enveloppe=None, targets=None):
     """Donut + tableau geo à partir des positions ouvertes."""
     import plotly.graph_objects as go
     import streamlit as st
@@ -226,8 +226,14 @@ def render_geo_section(open_df, fe_valo=0.0, title="Répartition géographique")
     try:
         from core.db import get_allocation_targets
         from core.geography import allocation_gap, ALLOC_ZONES, DEFAULT_TARGETS
-        targets = get_allocation_targets()
+        if targets is None:
+            env = (enveloppe or "GLOBAL").upper()
+            if env in ("PEA", "PER", "CTO"):
+                targets = get_allocation_targets(env)
+            else:
+                targets = get_allocation_targets("GLOBAL")
         gap_df = allocation_gap(geo, targets)
+        st.caption(f"Cibles : enveloppe **{enveloppe or 'GLOBAL'}**")
         st.markdown("**Allocation cible vs réelle**")
         st.caption(
             "Réel (%) sur la poche investie (hors fonds euros / non classé). "
