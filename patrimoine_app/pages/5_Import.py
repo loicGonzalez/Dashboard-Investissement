@@ -10,7 +10,8 @@ from core.state import (
     persist_enveloppe,
     load_from_db,
 )
-from core.style import inject_css, fmt_eur
+from core.style import inject_css
+from core.nav import render_sidebar
 from core.parsers import (
     extract_transaction_from_pdf,
     extract_transaction_from_traderepublic,
@@ -28,6 +29,7 @@ from core.db import (
 st.set_page_config(page_title="Import — Patrimoine", page_icon="📥", layout="wide")
 init_session()
 inject_css()
+render_sidebar(active="import")
 
 st.markdown("## 📥 Import")
 st.caption(f"Base locale : `{DB_PATH}` — les opérations survivent au redémarrage.")
