@@ -1,0 +1,91 @@
+Voici des idées **concrètes** pour enrichir la page d’accueil (**Vue globale**), en partant de ce qu’elle fait déjà (KPI, courbe, répartition enveloppes, géo, perf A/B, alertes cours).
+
+---
+
+### 1. Scoreboard “au réveil” (haut de page)
+
+| Élément | Intérêt |
+|---------|---------|
+| **Var. 1j / 1s** en chips à côté du titre | Réponse immédiate : “où en suis-je aujourd’hui ?” |
+| **Dernier import** (date + enveloppe) | Confiance dans la fraîcheur des données |
+| **Bandeau santé** | “3 cours manquants · 0 PDF en échec · cibles OK” |
+
+DONE
+---
+
+### 2. Cartes enveloppe cliquables
+
+Trois mini-cartes **PEA / PER / CTO** :
+- valo, PV, poids % du patrimoine  
+- pastille rouge si cours manquant ou écart d’allocation fort  
+- clic → page détail (déjà dans le menu, mais plus visible)
+
+DONE
+---
+
+### 3. Focus “écarts d’allocation” (actionnable)
+
+Sur la vue globale uniquement :
+- top **2–3 zones** surpondérées / sous-pondérées (moyenne pondérée déjà en place)  
+- montant € à réallouer (“il manque ~X € en Émergents”)  
+→ transforme la géo en **to-do**, pas seulement un camembert
+
+DONE
+---
+
+### 4. Top / flop positions
+
+Petit tableau :
+- **+3** et **−3** en PV latente (€ et %)  
+- filtre “toutes enveloppes”  
+
+Utile pour voir rapidement ce qui tire le portefeuille.
+
+DONE
+---
+
+### 5. Timeline & activité récente
+
+- 5–10 **dernières opérations** (tous comptes)  
+- ou extrait du **journal d’import**  
+
+La home devient un fil d’activité, pas seulement des totaux.
+
+DONE
+---
+
+### 6. Objectif patrimoine (optionnel)
+
+- objectif € (ex. 50 000 €) + barre de progression  
+- “il reste X € / Y mois au rythme actuel d’apports” (estimatif)  
+
+Motivation simple, sans sur-ingénierie.
+
+DONE
+---
+
+### 7. Empty state plus accueillant
+
+Quand il n’y a **pas de données** :
+- 3 boutons : *Importer PEA* · *Importer PER* · *Importer CTO*  
+- rappel du parcours (au lieu d’un simple `st.info`)
+
+---
+
+### 8. Ce que je ne mettrais **pas** en priorité sur la home
+
+- Détail de chaque ordre  
+- Réglages Powens / tickers  
+- Trop de graphiques (la page doit rester scannable en 5 secondes)
+
+---
+
+### Proposition d’ordre d’implémentation
+
+1. **Cartes PEA / PER / CTO** + poids %  
+2. **Chips perf 1j / 1s** + date dernier import  
+3. **Écarts d’allocation actionnables** (top sur/sous-pondérations)  
+4. **Top/flop positions**  
+5. Objectif patrimoine (si tu y tiens)
+
+Si tu en choisis une ou deux, on peut les coder directement sur `1_Vue_globale.py`.

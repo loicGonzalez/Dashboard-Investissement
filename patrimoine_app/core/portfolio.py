@@ -156,10 +156,13 @@ def build_history(by_isin: dict, transactions: list) -> dict:
         parts_history[isin] = parts_series
 
         # Prix de marché
-        ticker = YAHOO_TICKERS.get(isin)
+        raw = YAHOO_TICKERS.get(isin)
+        tickers = [raw] if isinstance(raw, str) else list(raw or [])
         prices = pd.Series(dtype=float)
-        if ticker:
+        for ticker in tickers:
             prices = get_historical_prices(ticker, start_date, end_date)
+            if not prices.empty:
+                break
 
         if not prices.empty:
             prices = prices.reindex(all_dates).ffill()
@@ -198,3 +201,147 @@ def build_summary(by_isin, current_prices):
     return pd.DataFrame(rows).sort_values("Valorisation (€)", ascending=False) if rows else pd.DataFrame()
 
 
+
+def performance_periods(portfolio_value, invested_cumul=None) -> list[dict]:
+    """
+    Performance hors apports (approx.) :
+
+        Δ marché = (Valo_fin − Valo_début) − (Investi_fin − Investi_début)
+        Perf %   = Δ marché / Valo_début
+
+    Ainsi un versement augmente valo et investi : la perf marché n'est pas
+    gonflée artificiellement. Ce n'est pas un TRI exact, mais cohérent pour
+    1j / 1s / 1m / YTD / depuis le début.
+    """
+    periods = [
+        ("1 jour", 1),
+        ("1 semaine", 7),
+        ("1 mois", 30),
+        ("Year to date", "ytd"),
+        ("Depuis le début", "all"),
+    ]
+    empty = [
+        {"label": lab, "delta_eur": None, "delta_pct": None, "available": False}
+        for lab, _ in periods
+    ]
+    if portfolio_value is None or getattr(portfolio_value, "empty", True):
+        return empty
+
+    s = portfolio_value.dropna().sort_index()
+    if s.empty:
+        return empty
+
+    inv = None
+    if invested_cumul is not None and not getattr(invested_cumul, "empty", True):
+        inv = invested_cumul.reindex(s.index).ffill().bfill()
+
+    end = s.index.max()
+    end_valo = float(s.iloc[-1])
+    end_inv = float(inv.iloc[-1]) if inv is not None else None
+
+    def _at_or_before(series, ts):
+        sub = series[series.index <= ts]
+        if sub.empty:
+            return None
+        return float(sub.iloc[-1])
+
+    out = []
+    for label, spec in periods:
+        if spec == "all":
+            nonzero = s[s > 0]
+            start_ts = nonzero.index[0] if not nonzero.empty else s.index[0]
+            start_valo = float(s.loc[start_ts]) if start_ts in s.index else float(s.iloc[0])
+            # align: first common point
+            start_valo = float(s.iloc[0]) if nonzero.empty else float(nonzero.iloc[0])
+            start_inv = float(inv.iloc[0]) if inv is not None else None
+            if inv is not None and not nonzero.empty:
+                start_inv = float(inv.reindex(s.index).ffill().loc[nonzero.index[0]])
+        elif spec == "ytd":
+            ytd_start = pd.Timestamp(year=int(end.year), month=1, day=1)
+            start_valo = _at_or_before(s, ytd_start)
+            if start_valo is None:
+                sub = s[s.index >= ytd_start]
+                if sub.empty:
+                    out.append({"label": label, "delta_eur": None, "delta_pct": None, "available": False})
+                    continue
+                start_valo = float(sub.iloc[0])
+                ytd_start = sub.index[0]
+            start_inv = _at_or_before(inv, ytd_start) if inv is not None else None
+        else:
+            target = end - pd.Timedelta(days=int(spec))
+            start_valo = _at_or_before(s, target)
+            start_inv = _at_or_before(inv, target) if inv is not None else None
+
+        if start_valo is None:
+            out.append({"label": label, "delta_eur": None, "delta_pct": None, "available": False})
+            continue
+
+        # Variation brute de valo
+        delta_valo = end_valo - start_valo
+        # Variation de l'investi (apports nets estimés sur la période)
+        if end_inv is not None and start_inv is not None:
+            delta_investi = end_inv - start_inv
+            delta_marche = delta_valo - delta_investi
+        else:
+            # sans courbe investi : retombe sur variation brute (moins fiable)
+            delta_marche = delta_valo
+
+        if abs(start_valo) < 1e-9:
+            out.append({"label": label, "delta_eur": None, "delta_pct": None, "available": False})
+            continue
+
+        pct = 100.0 * delta_marche / start_valo
+        out.append({
+            "label": label,
+            "delta_eur": round(delta_marche, 2),
+            "delta_pct": round(pct, 2),
+            "available": True,
+            "start_val": round(start_valo, 2),
+            "end_val": round(end_valo, 2),
+            "delta_apports": round((end_inv - start_inv), 2) if (end_inv is not None and start_inv is not None) else None,
+        })
+    return out
+
+
+def render_performance_cards(portfolio_value, invested_cumul=None):
+    """Affiche les cartes de performance (Streamlit)."""
+    import streamlit as st
+    from core.style import kpi_card, fmt_eur
+
+    rows = performance_periods(portfolio_value, invested_cumul)
+    cols = st.columns(len(rows))
+    for col, row in zip(cols, rows):
+        if not row["available"]:
+            kpi_card(col, row["label"], "—", sub="données insuffisantes")
+            continue
+        kpi_card(
+            col,
+            row["label"],
+            fmt_eur(row["delta_eur"], signed=True),
+            delta=f'{row["delta_pct"]:+.2f}%',
+            positive=row["delta_eur"] >= 0,
+        )
+
+
+
+def render_performance_cards(portfolio_value):
+    """Affiche les cartes de performance (à appeler depuis Streamlit)."""
+    import streamlit as st
+    from core.style import kpi_card, fmt_eur
+
+    rows = performance_periods(portfolio_value)
+    cols = st.columns(len(rows))
+    for col, row in zip(cols, rows):
+        if not row["available"]:
+            kpi_card(col, row["label"], "—", sub="données insuffisantes")
+            continue
+        d_eur = row["delta_eur"]
+        d_pct = row["delta_pct"]
+        positive = d_eur >= 0
+        kpi_card(
+            col,
+            row["label"],
+            fmt_eur(d_eur, signed=True),
+            delta=f"{d_pct:+.2f}%",
+            positive=positive,
+        )

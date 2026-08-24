@@ -1,0 +1,52 @@
+Patrimoine — lancement sur Mac (sans retaper la commande)
+=========================================================
+
+1) Une seule fois — dépendances
+-------------------------------
+Ouvre le Terminal, va dans ce dossier, puis :
+
+  cd /chemin/vers/patrimoine_app
+  python3 -m venv .venv
+  source .venv/bin/activate
+  pip install -r requirements.txt
+  chmod +x Lancer_Patrimoine.command
+
+2) Au quotidien — double-clic
+-----------------------------
+Dans le Finder : double-clic sur  Lancer_Patrimoine.command
+
+Si macOS bloque le fichier :
+  Clic droit → Ouvrir → Ouvrir
+  (ou Réglages Système → Confidentialité et sécurité → Autoriser)
+
+Le navigateur s'ouvre en général sur http://localhost:8501
+Pour quitter : ferme l'onglet et dans la fenêtre Terminal → Ctrl+C
+
+3) Optionnel — icône dans le Dock (Automator)
+---------------------------------------------
+1. Ouvre "Automator" (Spotlight)
+2. Nouveau document → Application
+3. Cherche l'action "Exécuter un script shell"
+4. Colle (adapte le chemin) :
+
+   cd "/chemin/absolu/vers/patrimoine_app"
+   source .venv/bin/activate
+   exec streamlit run streamlit_app.py
+
+5. Fichier → Enregistrer → Patrimoine.app
+6. Glisse Patrimoine.app dans le Dock
+
+4) Powens / secrets
+-------------------
+Ne pas mettre .env ni secrets/ dans le cloud non chiffré.
+Voir README.md et .gitignore
+
+
+5) Erreur "Failed building wheel for cryptography"
+--------------------------------------------------
+Pas nécessaire pour PEA/PER/CTO (PDF/CSV).
+Le requirements.txt ne l'impose plus.
+
+Si tu actives Powens plus tard :
+  pip install --upgrade pip setuptools wheel
+  pip install cryptography

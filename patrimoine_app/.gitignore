@@ -1,0 +1,31 @@
+# Secrets & environnement
+.env
+.env.*
+!.env.example
+secrets/**
+!secrets/.gitkeep
+*.pem
+*.key
+
+# Données locales
+data/*.db
+data/*.db-*
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.envrc
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Streamlit
+.streamlit/secrets.toml
+
+secrets/powens_token.txt

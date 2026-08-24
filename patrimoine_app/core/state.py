@@ -18,6 +18,11 @@ from core.portfolio import (
     build_summary,
 )
 from core.prices import get_current_prices, apply_price_fallbacks
+from core.db import (
+    init_db, load_operations, load_manual_prices,
+    insert_operations, replace_enveloppe, save_manual_prices,
+    count_operations, DB_PATH,
+)
 
 
 def init_session():
@@ -33,12 +38,47 @@ def init_session():
         "cto_files_names": [],
         "per_csv_name": None,
         "pea_csv_name": None,
+        "db_loaded": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v if not isinstance(v, dict) else dict(v)
             if isinstance(v, list):
                 st.session_state[k] = list(v)
+
+    # Charge SQLite une seule fois par session navigateur
+    if not st.session_state.get("db_loaded"):
+        load_from_db()
+        st.session_state["db_loaded"] = True
+
+
+def load_from_db():
+    """Remplit session_state depuis patrimoine.db."""
+    try:
+        init_db()
+    except Exception:
+        return
+    pea = load_operations("PEA")
+    per = load_operations("PER")
+    cto = load_operations("CTO")
+    # Sépare sources pour stats ; rebuild_portfolios fusionne
+    st.session_state["pea_files_data"] = [o for o in pea if "CSV" not in str(o.get("source", ""))]
+    st.session_state["pea_csv_data"] = [o for o in pea if "CSV" in str(o.get("source", ""))]
+    st.session_state["per_csv_data"] = [o for o in per if "Manuel" not in str(o.get("source", ""))]
+    st.session_state["per_manual"] = [o for o in per if "Manuel" in str(o.get("source", ""))]
+    st.session_state["cto_files_data"] = cto
+    st.session_state["manual_prices"] = load_manual_prices()
+    st.session_state["histories"] = {}
+    if pea or per or cto:
+        rebuild_portfolios()
+
+
+def persist_enveloppe(ops: list, enveloppe: str, mode: str = "merge") -> tuple:
+    """mode=merge → INSERT OR IGNORE ; mode=replace → DELETE + INSERT."""
+    if mode == "replace":
+        n = replace_enveloppe(ops, enveloppe)
+        return n, 0
+    return insert_operations(ops, enveloppe)
 
 
 def _parse_pdfs(files, prefer_tr=False):
