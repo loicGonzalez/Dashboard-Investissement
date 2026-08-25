@@ -34,6 +34,35 @@ GLOBAL_CSS = """
     .kpi-delta-pos { color: #34d399; font-size: 0.9rem; margin-top: 0.35rem; }
     .kpi-delta-neg { color: #f87171; font-size: 0.9rem; margin-top: 0.35rem; }
     .kpi-sub { color: #6b7280; font-size: 0.8rem; margin-top: 0.2rem; }
+    .kpi-help {
+        display: inline-block;
+        margin-left: 0.35rem;
+        color: #6b7280;
+        font-size: 0.72rem;
+        cursor: help;
+        border-bottom: 1px dotted #6b7280;
+    }
+    .kpi-legend {
+        color: #9ca3af;
+        font-size: 0.8rem;
+        line-height: 1.45;
+        margin: 0.35rem 0 0.9rem 0;
+        padding: 0.55rem 0.85rem;
+        background: #121820;
+        border-left: 3px solid #334155;
+        border-radius: 0 8px 8px 0;
+    }
+    .empty-state {
+        background: #151b24;
+        border: 1px dashed #334155;
+        border-radius: 16px;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        margin: 1.5rem 0;
+    }
+    .empty-state h3 { color: #f9fafb; margin-bottom: 0.5rem; }
+    .empty-state p { color: #9ca3af; margin-bottom: 1rem; }
+
     .section-card {
         background: #151b24;
         border: 1px solid #243041;
@@ -168,23 +197,48 @@ def inject_css():
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 
-def kpi_card(col, label, value, delta=None, sub=None, positive=True):
-    """Carte KPI HTML (sans indentation Markdown qui transforme en bloc code)."""
+def kpi_card(col, label, value, delta=None, sub=None, positive=True, help_text=None):
+    """Carte KPI HTML. help_text = info-bulle au survol du libellé."""
     delta_html = ""
     if delta is not None:
         cls = "kpi-delta-pos" if positive else "kpi-delta-neg"
         delta_html = f'<div class="{cls}">{delta}</div>'
     sub_html = f'<div class="kpi-sub">{sub}</div>' if sub else ""
-    # Important : HTML collé à gauche pour éviter le rendu "code" Markdown
+    help_html = ""
+    if help_text:
+        # title = tooltip natif navigateur
+        safe = str(help_text).replace('"', "&quot;")
+        help_html = f'<span class="kpi-help" title="{safe}">?</span>'
     html = (
         f'<div class="kpi-card">'
-        f'<div class="kpi-label">{label}</div>'
+        f'<div class="kpi-label">{label}{help_html}</div>'
         f'<div class="kpi-value">{value}</div>'
         f'{delta_html}'
         f'{sub_html}'
         f'</div>'
     )
     col.markdown(html, unsafe_allow_html=True)
+
+
+def kpi_legend(lines):
+    """Bloc légende sous une rangée de KPI. lines = liste de str."""
+    if not lines:
+        return
+    body = "<br/>".join(lines)
+    st.markdown(f'<div class="kpi-legend">{body}</div>', unsafe_allow_html=True)
+
+
+def empty_state(title, message, page_link_path=None, page_label="Aller à Import"):
+    """État vide avec CTA optionnel."""
+    st.markdown(
+        f'<div class="empty-state"><h3>{title}</h3><p>{message}</p></div>',
+        unsafe_allow_html=True,
+    )
+    if page_link_path:
+        try:
+            st.page_link(page_link_path, label=page_label, icon="📥")
+        except Exception:
+            st.info(f"Ouvre la page **{page_label}** dans le menu.")
 
 
 def fmt_eur(x, signed=False):

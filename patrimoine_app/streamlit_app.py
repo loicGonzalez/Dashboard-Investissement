@@ -57,7 +57,14 @@ cto = st.session_state.get("cto") or {"txs": [], "by_isin": {}, "df": pd.DataFra
 
 if not has_data:
     st.markdown("## ◆ Patrimoine")
-    st.info("Aucune donnée chargée. Va dans **Import** pour ajouter PDF / CSV.")
+    from core.style import empty_state
+    empty_state(
+        "Aucune donnée chargée",
+        "Importe tes avis PDF (PEA / CTO) ou CSV (PER) pour construire le tableau de bord.",
+        page_link_path="pages/5_Import.py",
+        page_label="Aller à Import",
+    )
+    st.caption("Parcours conseillé : Import → cette page → détail PEA / PER / CTO.")
     st.stop()
 
 # Enrichir chaque enveloppe
@@ -155,24 +162,42 @@ _health = (
 st.markdown(_health, unsafe_allow_html=True)
 
 k1, k2, k3, k4, k5 = st.columns(5)
-kpi_card(k1, "Apports estimés", fmt_eur(tot_apports))
+from core.style import kpi_legend
+kpi_card(
+    k1, "Apports estimés", fmt_eur(tot_apports),
+    help_text="Somme des versements nets estimés (ACHAT hors no_cash − retraits) + fonds euros.",
+)
 kpi_card(
     k2, "Patrimoine",
     fmt_eur(tot_patrimoine),
     delta=f"{tot_pv:+,.0f} € ({tot_pct:+.1f}%)".replace(",", " "),
     positive=tot_pv >= 0,
+    help_text="Valo titres + cash estimé + fonds euros.",
 )
-kpi_card(k3, "Plus-value", fmt_eur(tot_pv, signed=True), sub=f"{tot_pct:+.1f}%", positive=tot_pv >= 0)
+kpi_card(
+    k3, "Plus-value",
+    fmt_eur(tot_pv, signed=True),
+    sub=f"{tot_pct:+.1f}%",
+    positive=tot_pv >= 0,
+    help_text="Patrimoine − Apports. Inclut cash et fonds euros. Différent de la PV latente titres.",
+)
 n_pos = sum(
     len(x["open"]) for x in (pea_i, per_i, cto_i) if x["open"] is not None and not x["open"].empty
 )
-kpi_card(k4, "Positions ouvertes", str(n_pos), sub=f"cash {fmt_eur(tot_cash)}")
+kpi_card(k4, "Positions ouvertes", str(n_pos), sub=f"cash {fmt_eur(tot_cash)}",
+         help_text="Nombre de lignes encore détenues (parts > 0).")
 kpi_card(
     k5, "Frais d'achat",
     fmt_eur(tot_frais),
     sub=f"{(100 * tot_frais / tot_apports) if tot_apports else 0:.2f}% des apports",
     positive=False,
+    help_text="Cumul des frais d'exécution sur les ordres ACHAT (hors frais de gestion).",
 )
+kpi_legend([
+    "<b>Plus-value (KPI)</b> = patrimoine − apports (photo globale, cash inclus).",
+    "<b>PV latente</b> = valo titres − coût des positions ouvertes uniquement.",
+    "<b>Perf hors apports</b> (évolution) = (Δ valo − Δ investi) sur une période — les versements ne comptent pas comme perf.",
+])
 
 st.markdown("")
 

@@ -4,13 +4,18 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.state import enrich, metrics_for, get_history
-from core.style import kpi_card, fmt_eur, PLOTLY_LAYOUT
+from core.style import kpi_card, fmt_eur, PLOTLY_LAYOUT, kpi_legend, empty_state
 
 
 def render_envelope_detail(title, env_key, show_fe=False):
     data = st.session_state.get(env_key)
     if not data or not data.get("txs"):
-        st.warning(f"Aucune opération {title}. Va dans **Import** pour charger des fichiers.")
+        empty_state(
+            f"Aucune opération {title}",
+            "Charge des PDF ou un CSV depuis la page Import pour alimenter cette enveloppe.",
+            page_link_path="pages/5_Import.py",
+            page_label="Aller à Import",
+        )
         return
 
     by_isin = data["by_isin"]
@@ -24,22 +29,33 @@ def render_envelope_detail(title, env_key, show_fe=False):
 
     st.markdown(f"## {title}")
     k1, k2, k3, k4, k5, k6 = st.columns(6)
-    kpi_card(k1, "Apports", fmt_eur(m["apports"]))
-    kpi_card(k2, "Cash estimé", fmt_eur(m["flow"]["cash"]))
-    kpi_card(k3, "Valo titres", fmt_eur(m["valo_titres"]))
-    kpi_card(k4, "Patrimoine", fmt_eur(m["patrimoine"]))
+    kpi_card(k1, "Apports", fmt_eur(m["apports"]),
+             help_text="Versements nets estimés sur cette enveloppe.")
+    kpi_card(k2, "Cash estimé", fmt_eur(m["flow"]["cash"]),
+             help_text="Solde cash reconstitué (apports − achats + ventes − frais).")
+    kpi_card(k3, "Valo titres", fmt_eur(m["valo_titres"]),
+             help_text="Parts ouvertes × cours (Yahoo ou manuel).")
+    kpi_card(k4, "Patrimoine", fmt_eur(m["patrimoine"]),
+             help_text="Valo titres + cash (+ fonds euros si PER).")
     kpi_card(
         k5, "Plus-value",
         fmt_eur(m["pv"], signed=True),
         delta=f'{m["pct"]:+.1f}%',
         positive=m["pv"] >= 0,
+        help_text="Patrimoine − Apports. Pas la même chose que PV latente titres.",
     )
     kpi_card(
         k6, "Frais d'achat",
         fmt_eur(m.get("frais_achat", 0)),
         sub="cumul ACHAT",
         positive=False,
+        help_text="Cumul des frais d'exécution sur les ACHAT.",
     )
+    kpi_legend([
+        f"<b>{title}</b> — <b>Plus-value</b> = patrimoine − apports.",
+        "<b>PV latente</b> (onglet Évolution) = valo titres − investi des positions ouvertes.",
+        "<b>Perf hors apports</b> = variation de marché sur une période, hors versements.",
+    ])
 
     # Alertes cours manquants
     try:
