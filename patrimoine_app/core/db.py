@@ -361,3 +361,52 @@ def save_patrimoine_goal(target_eur: float, monthly_apport_eur: float = 0.0,
         "monthly_apport_eur": float(monthly_apport_eur or 0),
         "label": label or "Objectif patrimoine",
     }, db_path)
+
+
+def backup_db_bytes(db_path: Path | None = None) -> tuple[bytes, str]:
+    """
+    Lecture safe de la base pour téléchargement.
+    Retourne (contenu, nom_fichier_suggéré).
+    """
+    import shutil
+    from datetime import datetime as _dt
+
+    path = Path(db_path) if db_path else DB_PATH
+    init_db(path)
+    if not path.exists():
+        return b"", "patrimoine_empty.db"
+
+    # Copie via SQLite backup API pour éviter un fichier verrouillé à moitié écrit
+    stamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"patrimoine_backup_{stamp}.db"
+    tmp = path.parent / f".backup_tmp_{stamp}.db"
+    try:
+        src = get_connection(path)
+        try:
+            dst = sqlite3.connect(str(tmp))
+            try:
+                src.backup(dst)
+                dst.commit()
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        data = tmp.read_bytes()
+        return data, out_name
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def restore_db_from_bytes(data: bytes, db_path: Path | None = None) -> Path:
+    """Remplace la base locale par le contenu fourni (bytes .db)."""
+    path = Path(db_path) if db_path else DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Écriture atomique
+    tmp = path.with_suffix(".db.restore_tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return path

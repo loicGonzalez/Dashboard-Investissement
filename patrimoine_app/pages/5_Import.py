@@ -24,6 +24,8 @@ from core.db import (
     save_manual_prices,
     delete_enveloppe,
     init_db,
+    backup_db_bytes,
+    restore_db_from_bytes,
 )
 
 st.set_page_config(page_title="Import — Patrimoine", page_icon="📥", layout="wide")
@@ -472,6 +474,47 @@ try:
         st.caption("En Vue globale, la pondération suit la valorisation réelle de chaque enveloppe.")
 except Exception as e:
     st.warning(f"Cibles non disponibles : {e}")
+
+
+st.markdown("### 💾 Sauvegarde base SQLite")
+st.caption(
+    "Télécharge une copie cohérente de `patrimoine.db` (opérations, cours manuels, "
+    "cibles d'allocation, objectif, journal d'import)."
+)
+b1, b2 = st.columns(2)
+with b1:
+    try:
+        _db_bytes, _db_name = backup_db_bytes()
+        if _db_bytes:
+            st.download_button(
+                label="⬇️ Télécharger la sauvegarde (.db)",
+                data=_db_bytes,
+                file_name=_db_name,
+                mime="application/x-sqlite3",
+                type="primary",
+            )
+            st.caption(f"{len(_db_bytes) / 1024:.1f} Ko · {_db_name}")
+        else:
+            st.warning("Base vide ou introuvable.")
+    except Exception as e:
+        st.error(f"Sauvegarde impossible : {e}")
+with b2:
+    _up = st.file_uploader(
+        "Restaurer une sauvegarde .db",
+        type=["db", "sqlite", "sqlite3"],
+        key="restore_db",
+    )
+    if _up is not None and st.button("Restaurer (écrase la base locale)", type="secondary"):
+        try:
+            restore_db_from_bytes(_up.read())
+            st.session_state["db_loaded"] = False
+            load_from_db()
+            st.session_state["db_loaded"] = True
+            st.session_state["histories"] = {}
+            st.success("Base restaurée — session rechargée.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Restauration échouée : {e}")
 
 st.markdown("### Maintenance")
 m1, m2, m3 = st.columns(3)
