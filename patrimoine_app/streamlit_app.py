@@ -289,314 +289,296 @@ with st.expander("🎯 Objectif patrimoine", expanded=bool(_goal.get("target_eur
         )
         st.markdown(_html, unsafe_allow_html=True)
 
-st.markdown("**Enveloppes**")
-c_pea, c_per, c_cto = st.columns(3)
-for col, card in zip((c_pea, c_per, c_cto), cards):
-    with col:
-        badge_cls = f"env-card-badge {card['badge']}" if card["badge"] else "env-card-badge"
-        pv_color = "#34d399" if card["pv_lat"] >= 0 else "#f87171"
-        html = (
-            f'<div class="env-card" title="{card["badge_title"]}">'
-            f'<div class="{badge_cls}"></div>'
-            f'<div class="env-card-title" style="color:{color_map[card["name"]]}">{card["name"]}</div>'
-            f'<div class="env-card-valo">{fmt_eur(card["valo"])}</div>'
-            f'<div class="env-card-sub">PV latente '
-            f'<span style="color:{pv_color}">{fmt_eur(card["pv_lat"], signed=True)} '
-            f'({card["pct_lat"]:+.1f}%)</span></div>'
-            f'<span class="env-weight">{card["weight"]:.1f}% du patrimoine</span>'
-            f'</div>'
-        )
-        st.markdown(html, unsafe_allow_html=True)
-        # Lien navigation Streamlit
-        try:
-            st.page_link(page_map[card["name"]], label=f"Ouvrir {card['name']} →", icon="↗")
-        except Exception:
-            st.caption(f"Menu → {card['name']}")
+with st.expander("📦 Enveloppes", expanded=True):
+    c_pea, c_per, c_cto = st.columns(3)
+    for col, card in zip((c_pea, c_per, c_cto), cards):
+        with col:
+            badge_cls = f"env-card-badge {card['badge']}" if card["badge"] else "env-card-badge"
+            pv_color = "#34d399" if card["pv_lat"] >= 0 else "#f87171"
+            html = (
+                f'<div class="env-card" title="{card["badge_title"]}">'
+                f'<div class="{badge_cls}"></div>'
+                f'<div class="env-card-title" style="color:{color_map[card["name"]]}">{card["name"]}</div>'
+                f'<div class="env-card-valo">{fmt_eur(card["valo"])}</div>'
+                f'<div class="env-card-sub">PV latente '
+                f'<span style="color:{pv_color}">{fmt_eur(card["pv_lat"], signed=True)} '
+                f'({card["pct_lat"]:+.1f}%)</span></div>'
+                f'<span class="env-weight">{card["weight"]:.1f}% du patrimoine</span>'
+                f'</div>'
+            )
+            st.markdown(html, unsafe_allow_html=True)
+            try:
+                st.page_link(page_map[card["name"]], label=f"Ouvrir {card['name']} →", icon="↗")
+            except Exception:
+                st.caption(f"Menu → {card['name']}")
 
-st.markdown("")
 
 # ——— Top / flop positions (PV latente) ———
-st.markdown("**Top / flop positions**")
-st.caption("Plus-value latente = valorisation − investi (positions ouvertes, toutes enveloppes).")
-
-_pos_rows = []
-for _env_name, _info, _m in (
-    ("PEA", pea_i, pea_m),
-    ("PER", per_i, per_m),
-    ("CTO", cto_i, cto_m),
-):
-    _o = _info.get("open")
-    if _o is None or getattr(_o, "empty", True):
-        continue
-    for _, r in _o.iterrows():
-        try:
-            inv = float(r.get("Investi (€)") or 0)
-            valo = r.get("Valorisation (€)")
-            if valo is None or (isinstance(valo, float) and pd.isna(valo)):
-                continue
-            valo = float(valo)
-            pv = valo - inv
-            pct = (100 * pv / inv) if inv else 0.0
-            _pos_rows.append({
-                "Enveloppe": _env_name,
-                "Nom": str(r.get("Nom") or r.get("ISIN") or "")[:40],
-                "ISIN": r.get("ISIN"),
-                "PV latente (€)": round(pv, 2),
-                "PV %": round(pct, 2),
-                "Valo (€)": round(valo, 2),
-                "Investi (€)": round(inv, 2),
-            })
-        except (TypeError, ValueError):
+with st.expander("📊 Top / flop positions", expanded=False):
+    st.caption("Plus-value latente = valorisation − investi (positions ouvertes, toutes enveloppes).")
+    _pos_rows = []
+    for _env_name, _info, _m in (
+        ("PEA", pea_i, pea_m),
+        ("PER", per_i, per_m),
+        ("CTO", cto_i, cto_m),
+    ):
+        _o = _info.get("open")
+        if _o is None or getattr(_o, "empty", True):
             continue
-
-if _pos_rows:
-    _pos_df = pd.DataFrame(_pos_rows)
-    _top = _pos_df.nlargest(3, "PV latente (€)")
-    _flop = _pos_df.nsmallest(3, "PV latente (€)")
-    c_top, c_flop = st.columns(2)
-    with c_top:
-        st.markdown("**Top 3** (meilleure PV latente)")
-        st.dataframe(
-            _top[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-    with c_flop:
-        st.markdown("**Flop 3** (moins bonne PV latente)")
-        st.dataframe(
-            _flop[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-else:
-    st.caption("Aucune position valorisée pour le classement.")
-
-st.markdown("")
+        for _, r in _o.iterrows():
+            try:
+                inv = float(r.get("Investi (€)") or 0)
+                valo = r.get("Valorisation (€)")
+                if valo is None or (isinstance(valo, float) and pd.isna(valo)):
+                    continue
+                valo = float(valo)
+                pv = valo - inv
+                pct = (100 * pv / inv) if inv else 0.0
+                _pos_rows.append({
+                    "Enveloppe": _env_name,
+                    "Nom": str(r.get("Nom") or r.get("ISIN") or "")[:40],
+                    "ISIN": r.get("ISIN"),
+                    "PV latente (€)": round(pv, 2),
+                    "PV %": round(pct, 2),
+                    "Valo (€)": round(valo, 2),
+                    "Investi (€)": round(inv, 2),
+                })
+            except (TypeError, ValueError):
+                continue
+    if _pos_rows:
+        _pos_df = pd.DataFrame(_pos_rows)
+        _top = _pos_df.nlargest(3, "PV latente (€)")
+        _flop = _pos_df.nsmallest(3, "PV latente (€)")
+        c_top, c_flop = st.columns(2)
+        with c_top:
+            st.markdown("**Top 3** (meilleure PV latente)")
+            st.dataframe(
+                _top[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+        with c_flop:
+            st.markdown("**Flop 3** (moins bonne PV latente)")
+            st.dataframe(
+                _flop[["Enveloppe", "Nom", "PV latente (€)", "PV %", "Valo (€)"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+    else:
+        st.caption("Aucune position valorisée pour le classement.")
 
 # ——— Activité récente ———
-st.markdown("**Activité récente**")
-a1, a2 = st.columns(2)
-
-with a1:
-    st.markdown("**Dernières opérations**")
-    _ops = []
-    for _env, _txs in (("PEA", pea.get("txs") or []), ("PER", per.get("txs") or []), ("CTO", cto.get("txs") or [])):
-        for op in _txs:
-            d = op.get("date") or op.get("date_str") or ""
-            # normalize date for sort
-            ds = str(d)[:10]
-            if len(ds) == 10 and ds[2] == "/":
-                # dd/mm/yyyy
-                try:
-                    dd, mm, yy = ds.split("/")
-                    sort_key = f"{yy}-{mm}-{dd}"
-                except Exception:
+with st.expander("🕒 Activité récente", expanded=False):
+    a1, a2 = st.columns(2)
+    with a1:
+        st.markdown("**Dernières opérations**")
+        _ops = []
+        for _env, _txs in (
+            ("PEA", pea.get("txs") or []),
+            ("PER", per.get("txs") or []),
+            ("CTO", cto.get("txs") or []),
+        ):
+            for op in _txs:
+                d = op.get("date") or op.get("date_str") or ""
+                ds = str(d)[:10]
+                if len(ds) == 10 and ds[2] == "/":
+                    try:
+                        dd, mm, yy = ds.split("/")
+                        sort_key = f"{yy}-{mm}-{dd}"
+                    except Exception:
+                        sort_key = ds
+                else:
                     sort_key = ds
-            else:
-                sort_key = ds
-            _ops.append({
-                "_sort": sort_key,
-                "Date": ds,
-                "Env.": _env,
-                "Type": str(op.get("type") or "").upper(),
-                "Nom": str(op.get("valeur") or op.get("nom") or op.get("isin") or "")[:28],
-                "Qté": op.get("quantite"),
-                "Montant (€)": op.get("montant"),
-                "Source": str(op.get("source") or "")[:20],
-            })
-    if _ops:
-        _ops_df = pd.DataFrame(_ops).sort_values("_sort", ascending=False).head(10)
-        st.dataframe(
-            _ops_df.drop(columns=["_sort"]),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.caption("Aucune opération.")
-
-with a2:
-    st.markdown("**Derniers imports**")
-    _j = load_journal()
-    if _j:
-        _jrows = []
-        for e in _j[:8]:
-            _jrows.append({
-                "Date": e.get("ts"),
-                "Env.": e.get("enveloppe"),
-                "Source": e.get("source"),
-                "Insérées": e.get("inserted"),
-                "Doublons": e.get("duplicates"),
-                "Échecs": e.get("failed"),
-            })
-        st.dataframe(pd.DataFrame(_jrows), use_container_width=True, hide_index=True)
-    else:
-        st.caption("Aucun import dans le journal.")
-
-st.markdown("")
-
-# Charts
-left, right = st.columns([1.35, 1])
-
-# Historique cumulé
-all_txs = pea["txs"] + per["txs"] + cto["txs"]
-all_by = {}
-for src in (pea["by_isin"], per["by_isin"], cto["by_isin"]):
-    for isin, v in src.items():
-        if isin not in all_by:
-            all_by[isin] = {"name": v["name"], "parts": 0.0, "investi": 0.0, "ops": []}
-        all_by[isin]["ops"].extend(v["ops"])
-        all_by[isin]["name"] = v["name"] or all_by[isin]["name"]
-# recalcul parts/investi agrégé
-_, all_by = process_transactions(all_txs)
-hist = get_history(f"global_{len(all_txs)}", all_by, all_txs)
-pv = hist["portfolio_value"]
-inv = hist["invested_cumul"]
-
-with left:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("**Évolution du patrimoine**")
-    fig = go.Figure()
-    if not pv.empty:
-        fig.add_trace(go.Scatter(
-            x=pv.index, y=pv, name="Valorisation",
-            line=dict(color="#60a5fa", width=2.4),
-            fill="tozeroy", fillcolor="rgba(96,165,250,0.08)",
-            hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
-        ))
-        fig.add_trace(go.Scatter(
-            x=inv.index, y=inv, name="Investi",
-            line=dict(color="#a78bfa", width=2, dash="dot"),
-            hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
-        ))
-    fig.update_layout(
-        **PLOTLY_LAYOUT, height=340, hovermode="x unified",
-        xaxis=dict(showgrid=False, zeroline=False),
-        yaxis=dict(showgrid=True, gridcolor="#1f2937", zeroline=False, ticksuffix=" €"),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    if not pv.empty:
-        st.markdown("**Performance (valorisation)**")
-        st.markdown("**A · PV latente (aujourd’hui)**")
-        st.caption("Valorisation actuelle − coût de revient des positions ouvertes (consolidé).")
-        _inv_sum = _valo_sum = 0.0
-        for _info in (pea_i, per_i, cto_i):
-            _o = _info.get("open")
-            if _o is not None and not _o.empty:
-                _inv_sum += float(_o["Investi (€)"].fillna(0).sum())
-                _valo_sum += float(_o["Valorisation (€)"].fillna(0).sum())
-        _pv_lat = _valo_sum - _inv_sum
-        _pct_lat = 100 * _pv_lat / _inv_sum if _inv_sum else 0.0
-        _c1, _c2 = st.columns([1, 2])
-        kpi_card(_c1, "PV latente", fmt_eur(_pv_lat, signed=True), delta=f"{_pct_lat:+.1f}%", positive=_pv_lat >= 0)
-        with _c2:
-            st.markdown(
-                f"<div style='padding:12px 8px;color:#9ca3af;font-size:0.9rem'>"
-                f"Valo <b style='color:#e5e7eb'>{fmt_eur(_valo_sum)}</b> − Investi "
-                f"<b style='color:#e5e7eb'>{fmt_eur(_inv_sum)}</b></div>",
-                unsafe_allow_html=True,
+                _ops.append({
+                    "_sort": sort_key,
+                    "Date": ds,
+                    "Env.": _env,
+                    "Type": str(op.get("type") or "").upper(),
+                    "Nom": str(op.get("valeur") or op.get("nom") or op.get("isin") or "")[:28],
+                    "Qté": op.get("quantite"),
+                    "Montant (€)": op.get("montant"),
+                    "Source": str(op.get("source") or "")[:20],
+                })
+        if _ops:
+            _ops_df = pd.DataFrame(_ops).sort_values("_sort", ascending=False).head(10)
+            st.dataframe(
+                _ops_df.drop(columns=["_sort"]),
+                use_container_width=True,
+                hide_index=True,
             )
-        st.markdown("**B · Perf hors apports (par période)**")
-        st.caption("(Δ valo − Δ investi) / valo début. Les versements ne comptent pas comme performance.")
-        rows = performance_periods(pv, inv)
-        pcs = st.columns(len(rows))
-        for col, row in zip(pcs, rows):
-            if not row["available"]:
-                kpi_card(col, row["label"], "—", sub="n/d")
-                continue
-            kpi_card(
-                col,
-                row["label"],
-                fmt_eur(row["delta_eur"], signed=True),
-                delta=f'{row["delta_pct"]:+.2f}%',
-                positive=row["delta_eur"] >= 0,
-            )
-    st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.caption("Aucune opération.")
+    with a2:
+        st.markdown("**Derniers imports**")
+        _j = load_journal()
+        if _j:
+            _jrows = []
+            for e in _j[:8]:
+                _jrows.append({
+                    "Date": e.get("ts"),
+                    "Env.": e.get("enveloppe"),
+                    "Source": e.get("source"),
+                    "Insérées": e.get("inserted"),
+                    "Doublons": e.get("duplicates"),
+                    "Échecs": e.get("failed"),
+                })
+            st.dataframe(pd.DataFrame(_jrows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Aucun import dans le journal.")
 
-with right:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("**Répartition par enveloppe**")
-    env_labels = ["PEA", "PER", "CTO"]
-    env_vals = [
-        pea_m["valo_titres"],
-        per_m["valo_titres"] + per_m["fe_valo"],
-        cto_m["valo_titres"],
-    ]
-    # éviter pie vide
-    if sum(env_vals) > 0:
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=env_labels, values=env_vals, hole=0.62,
-            marker=dict(colors=[ENV_COLORS["PEA"], ENV_COLORS["PER"], ENV_COLORS["CTO"]]),
-            textinfo="label+percent", textfont=dict(size=12, color="#e5e7eb"),
-            hovertemplate="%{label}<br>%{value:,.0f} €<extra></extra>",
-        )])
-        fig_pie.update_layout(**PLOTLY_LAYOUT, height=340, showlegend=False)
-        total_txt = f"{sum(env_vals):,.0f} €".replace(",", " ")
-        fig_pie.add_annotation(
-            text=f"<b>{total_txt}</b><br><span style='font-size:11px;color:#9ca3af'>titres+FE</span>",
-            x=0.5, y=0.5, showarrow=False, font=dict(size=15, color="#f9fafb"),
+# ——— Charts ———
+with st.expander("📈 Évolution & répartition", expanded=True):
+    left, right = st.columns([1.35, 1])
+    all_txs = pea["txs"] + per["txs"] + cto["txs"]
+    all_by = {}
+    for src in (pea["by_isin"], per["by_isin"], cto["by_isin"]):
+        for isin, v in src.items():
+            if isin not in all_by:
+                all_by[isin] = {"name": v["name"], "parts": 0.0, "investi": 0.0, "ops": []}
+            all_by[isin]["ops"].extend(v["ops"])
+            all_by[isin]["name"] = v["name"] or all_by[isin]["name"]
+    _, all_by = process_transactions(all_txs)
+    hist = get_history(f"global_{len(all_txs)}", all_by, all_txs)
+    pv = hist["portfolio_value"]
+    inv = hist["invested_cumul"]
+
+    with left:
+        st.markdown("**Évolution du patrimoine**")
+        fig = go.Figure()
+        if not pv.empty:
+            fig.add_trace(go.Scatter(
+                x=pv.index, y=pv, name="Valorisation",
+                line=dict(color="#60a5fa", width=2.4),
+                fill="tozeroy", fillcolor="rgba(96,165,250,0.08)",
+                hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=inv.index, y=inv, name="Investi",
+                line=dict(color="#a78bfa", width=2, dash="dot"),
+                hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
+            ))
+        fig.update_layout(
+            **PLOTLY_LAYOUT, height=340, hovermode="x unified",
+            xaxis=dict(showgrid=False, zeroline=False),
+            yaxis=dict(showgrid=True, gridcolor="#1f2937", zeroline=False, ticksuffix=" €"),
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
+        if not pv.empty:
+            st.markdown("**A · PV latente (aujourd'hui)**")
+            st.caption("Valorisation actuelle − coût de revient des positions ouvertes (consolidé).")
+            _inv_sum = _valo_sum = 0.0
+            for _info in (pea_i, per_i, cto_i):
+                _o = _info.get("open")
+                if _o is not None and not _o.empty:
+                    _inv_sum += float(_o["Investi (€)"].fillna(0).sum())
+                    _valo_sum += float(_o["Valorisation (€)"].fillna(0).sum())
+            _pv_lat = _valo_sum - _inv_sum
+            _pct_lat = 100 * _pv_lat / _inv_sum if _inv_sum else 0.0
+            _c1, _c2 = st.columns([1, 2])
+            kpi_card(_c1, "PV latente", fmt_eur(_pv_lat, signed=True), delta=f"{_pct_lat:+.1f}%", positive=_pv_lat >= 0)
+            with _c2:
+                st.markdown(
+                    f"<div style='padding:12px 8px;color:#9ca3af;font-size:0.9rem'>"
+                    f"Valo <b style='color:#e5e7eb'>{fmt_eur(_valo_sum)}</b> − Investi "
+                    f"<b style='color:#e5e7eb'>{fmt_eur(_inv_sum)}</b></div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown("**B · Perf hors apports (par période)**")
+            st.caption("(Δ valo − Δ investi) / valo début. Les versements ne comptent pas comme performance.")
+            rows = performance_periods(pv, inv)
+            pcs = st.columns(len(rows))
+            for col, row in zip(pcs, rows):
+                if not row["available"]:
+                    kpi_card(col, row["label"], "—", sub="n/d")
+                    continue
+                kpi_card(
+                    col,
+                    row["label"],
+                    fmt_eur(row["delta_eur"], signed=True),
+                    delta=f'{row["delta_pct"]:+.2f}%',
+                    positive=row["delta_eur"] >= 0,
+                )
+
+    with right:
+        st.markdown("**Répartition par enveloppe**")
+        env_labels = ["PEA", "PER", "CTO"]
+        env_vals = [
+            pea_m["valo_titres"],
+            per_m["valo_titres"] + per_m["fe_valo"],
+            cto_m["valo_titres"],
+        ]
+        if sum(env_vals) > 0:
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=env_labels, values=env_vals, hole=0.62,
+                marker=dict(colors=[ENV_COLORS["PEA"], ENV_COLORS["PER"], ENV_COLORS["CTO"]]),
+                textinfo="label+percent", textfont=dict(size=12, color="#e5e7eb"),
+                hovertemplate="%{label}<br>%{value:,.0f} €<extra></extra>",
+            )])
+            fig_pie.update_layout(**PLOTLY_LAYOUT, height=340, showlegend=False)
+            total_txt = f"{sum(env_vals):,.0f} €".replace(",", " ")
+            fig_pie.add_annotation(
+                text=f"<b>{total_txt}</b><br><span style='font-size:11px;color:#9ca3af'>titres+FE</span>",
+                x=0.5, y=0.5, showarrow=False, font=dict(size=15, color="#f9fafb"),
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.caption("Pas de valorisation à afficher.")
+
+with st.expander("📋 Résumé KPI par enveloppe", expanded=False):
+    e1, e2, e3 = st.columns(3)
+    for col, name, mtr, pill in [
+        (e1, "PEA", pea_m, "pill-pea"),
+        (e2, "PER", per_m, "pill-per"),
+        (e3, "CTO", cto_m, "pill-cto"),
+    ]:
+        valo_env = mtr["valo_titres"] + mtr.get("fe_valo", 0)
+        delta_cls = "kpi-delta-pos" if mtr["pv"] >= 0 else "kpi-delta-neg"
+        col.markdown(
+            f'<div class="kpi-card">'
+            f'<span class="pill {pill}">{name}</span>'
+            f'<div style="margin-top:0.8rem;" class="kpi-value">{fmt_eur(valo_env)}</div>'
+            f'<div class="{delta_cls}">{fmt_eur(mtr["pv"], signed=True)} ({mtr["pct"]:+.1f}%)</div>'
+            f'<div class="kpi-sub">apports {fmt_eur(mtr["apports"])}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+with st.expander("📑 Positions consolidées", expanded=False):
+    frames = []
+    for env_name, info in [("PEA", pea_i), ("PER", per_i), ("CTO", cto_i)]:
+        o = info["open"]
+        if o is not None and not o.empty:
+            tf = o.copy()
+            tf.insert(0, "Enveloppe", env_name)
+            frames.append(tf)
+    if frames:
+        all_pos = pd.concat(frames, ignore_index=True)
+        pos_sorted = all_pos.sort_values("Valorisation (€)", ascending=True)
+        colors = [ENV_COLORS.get(e, "#60a5fa") for e in pos_sorted["Enveloppe"]]
+        fig_bar = go.Figure(go.Bar(
+            x=pos_sorted["Valorisation (€)"],
+            y=pos_sorted["Nom"].astype(str).str[:28],
+            orientation="h",
+            marker=dict(color=colors),
+            text=[f"{v:,.0f} €".replace(",", " ") if pd.notna(v) else "—" for v in pos_sorted["Valorisation (€)"]],
+            textposition="outside",
+            hovertemplate="<b>%{y}</b><br>%{x:,.0f} €<extra></extra>",
+        ))
+        layout = {
+            **PLOTLY_LAYOUT,
+            "height": max(280, 28 * len(pos_sorted)),
+            "xaxis": dict(showgrid=True, gridcolor="#1f2937"),
+            "yaxis": dict(showgrid=False),
+            "margin": dict(l=10, r=70, t=10, b=10),
+        }
+        fig_bar.update_layout(**layout)
+        st.plotly_chart(fig_bar, use_container_width=True)
+        st.dataframe(all_pos, use_container_width=True, hide_index=True)
     else:
-        st.caption("Pas de valorisation à afficher.")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# Cartes enveloppes
-st.markdown("### Enveloppes")
-e1, e2, e3 = st.columns(3)
-for col, name, mtr, pill in [
-    (e1, "PEA", pea_m, "pill-pea"),
-    (e2, "PER", per_m, "pill-per"),
-    (e3, "CTO", cto_m, "pill-cto"),
-]:
-    valo_env = mtr["valo_titres"] + mtr.get("fe_valo", 0)
-    delta_cls = "kpi-delta-pos" if mtr["pv"] >= 0 else "kpi-delta-neg"
-    col.markdown(
-        f'<div class="kpi-card">'
-        f'<span class="pill {pill}">{name}</span>'
-        f'<div style="margin-top:0.8rem;" class="kpi-value">{fmt_eur(valo_env)}</div>'
-        f'<div class="{delta_cls}">{fmt_eur(mtr["pv"], signed=True)} ({mtr["pct"]:+.1f}%)</div>'
-        f'<div class="kpi-sub">apports {fmt_eur(mtr["apports"])}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-# Tableau positions consolidé
-st.markdown("### Positions")
-frames = []
-for env_name, info in [("PEA", pea_i), ("PER", per_i), ("CTO", cto_i)]:
-    o = info["open"]
-    if o is not None and not o.empty:
-        t = o.copy()
-        t.insert(0, "Enveloppe", env_name)
-        frames.append(t)
-if frames:
-    all_pos = pd.concat(frames, ignore_index=True)
-    # barres
-    pos_sorted = all_pos.sort_values("Valorisation (€)", ascending=True)
-    colors = [ENV_COLORS.get(e, "#60a5fa") for e in pos_sorted["Enveloppe"]]
-    fig_bar = go.Figure(go.Bar(
-        x=pos_sorted["Valorisation (€)"],
-        y=pos_sorted["Nom"].astype(str).str[:28],
-        orientation="h",
-        marker=dict(color=colors),
-        text=[f"{v:,.0f} €".replace(",", " ") if pd.notna(v) else "—" for v in pos_sorted["Valorisation (€)"]],
-        textposition="outside",
-        hovertemplate="<b>%{y}</b><br>%{x:,.0f} €<extra></extra>",
-    ))
-    layout = {**PLOTLY_LAYOUT, "height": max(280, 28 * len(pos_sorted)),
-              "xaxis": dict(showgrid=True, gridcolor="#1f2937"),
-              "yaxis": dict(showgrid=False),
-              "margin": dict(l=10, r=70, t=10, b=10)}
-    fig_bar.update_layout(**layout)
-    st.plotly_chart(fig_bar, use_container_width=True)
-    st.dataframe(all_pos, use_container_width=True, hide_index=True)
-else:
-    st.caption("Aucune position ouverte.")
-
+        st.caption("Aucune position ouverte.")
 
 # Alertes consolidées cours manquants
 try:
-    from core.import_log import missing_price_alerts_from_open_df
     _all_alerts = []
     for _info in (pea_i, per_i, cto_i):
         _all_alerts.extend(missing_price_alerts_from_open_df(_info.get("open")))
@@ -609,95 +591,83 @@ try:
 except Exception:
     pass
 
+# Géo + réallocation
+with st.expander("🌍 Allocation géographique & réallocation", expanded=True):
+    st.markdown("### Répartition géographique (tous comptes)")
+    all_open_frames = []
+    for info in (pea_i, per_i, cto_i):
+        o = info.get("open")
+        if o is not None and not o.empty:
+            all_open_frames.append(o)
+    all_open = pd.concat(all_open_frames, ignore_index=True) if all_open_frames else pd.DataFrame()
+    from core.db import average_allocation_targets, save_allocation_targets, get_allocation_targets
+    from core.geography import allocate_geo, allocation_gap
 
-# Géo globale consolidée
-st.markdown("### Répartition géographique (tous comptes)")
-all_open_frames = []
-for info in (pea_i, per_i, cto_i):
-    o = info.get("open")
-    if o is not None and not o.empty:
-        all_open_frames.append(o)
-import pandas as pd
-all_open = pd.concat(all_open_frames, ignore_index=True) if all_open_frames else pd.DataFrame()
-from core.db import average_allocation_targets, save_allocation_targets, get_allocation_targets
-from core.geography import allocate_geo, allocation_gap
+    _weights = {
+        "PEA": pea_m.get("valo_titres", 0) or 0,
+        "PER": (per_m.get("valo_titres", 0) or 0) + (per_m.get("fe_valo", 0) or 0),
+        "CTO": cto_m.get("valo_titres", 0) or 0,
+    }
+    _global_targets = average_allocation_targets(_weights)
+    save_allocation_targets(_global_targets, "GLOBAL")
 
-_weights = {
-    "PEA": pea_m.get("valo_titres", 0) or 0,
-    "PER": (per_m.get("valo_titres", 0) or 0) + (per_m.get("fe_valo", 0) or 0),
-    "CTO": cto_m.get("valo_titres", 0) or 0,
-}
-_global_targets = average_allocation_targets(_weights)
-# mémorise la moyenne calculée pour affichage (non éditable ici)
-save_allocation_targets(_global_targets, "GLOBAL")
-
-# ——— Focus écarts d'allocation (actionnable) ———
-st.markdown("### À réallouer")
-st.caption(
-    "Écarts vs cibles globales (moyenne pondérée PEA/PER/CTO). "
-    "Montants indicatifs sur la poche investie hors fonds euros."
-)
-try:
-    _positions = all_open.to_dict("records") if all_open is not None and not all_open.empty else []
-    _geo = allocate_geo(_positions, fe_valo=per_m.get("fe_valo", 0) or 0)
-    _gap = allocation_gap(_geo, _global_targets)
-    if _gap is not None and not _gap.empty and "Écart (€)" in _gap.columns:
-        g = _gap[_gap["Cible (%)"].notna()].copy()
-        g["Écart abs"] = g["Écart (€)"].abs()
-        g = g[g["Écart abs"] >= 1]  # ignore micro-écarts
-        over = g[g["Écart (€)"] > 0].sort_values("Écart (€)", ascending=False).head(3)
-        under = g[g["Écart (€)"] < 0].sort_values("Écart (€)", ascending=True).head(3)
-
-        c_over, c_under = st.columns(2)
-        with c_over:
-            st.markdown("**Surpondéré** (réduire / vendre vers cible)")
-            if over.empty:
-                st.caption("Aucun écart significatif")
-            else:
-                for _, row in over.iterrows():
-                    st.markdown(
-                        f"- **{row['Zone']}** : "
-                        f"+{row['Écart (pts)']:.1f} pts · "
-                        f"**{row['Écart (€)']:,.0f} €** en trop"
-                        .replace(",", " ")
+    st.markdown("### À réallouer")
+    st.caption(
+        "Écarts vs cibles globales (moyenne pondérée PEA/PER/CTO). "
+        "Montants indicatifs sur la poche investie hors fonds euros."
+    )
+    try:
+        _positions = all_open.to_dict("records") if all_open is not None and not all_open.empty else []
+        _geo = allocate_geo(_positions, fe_valo=per_m.get("fe_valo", 0) or 0)
+        _gap = allocation_gap(_geo, _global_targets)
+        if _gap is not None and not _gap.empty and "Écart (€)" in _gap.columns:
+            g = _gap[_gap["Cible (%)"].notna()].copy()
+            g["Écart abs"] = g["Écart (€)"].abs()
+            g = g[g["Écart abs"] >= 1]
+            over = g[g["Écart (€)"] > 0].sort_values("Écart (€)", ascending=False).head(3)
+            under = g[g["Écart (€)"] < 0].sort_values("Écart (€)", ascending=True).head(3)
+            c_over, c_under = st.columns(2)
+            with c_over:
+                st.markdown("**Surpondéré** (réduire / vendre vers cible)")
+                if over.empty:
+                    st.caption("Aucun écart significatif")
+                else:
+                    for _, row in over.iterrows():
+                        st.markdown(
+                            f"- **{row['Zone']}** : +{row['Écart (pts)']:.1f} pts · "
+                            f"**{row['Écart (€)']:,.0f} €** en trop".replace(",", " ")
+                        )
+            with c_under:
+                st.markdown("**Sous-pondéré** (renforcer / acheter vers cible)")
+                if under.empty:
+                    st.caption("Aucun écart significatif")
+                else:
+                    for _, row in under.iterrows():
+                        st.markdown(
+                            f"- **{row['Zone']}** : {row['Écart (pts)']:.1f} pts · "
+                            f"**{abs(row['Écart (€)']):,.0f} €** à ajouter".replace(",", " ")
+                        )
+            if not over.empty and not under.empty:
+                top_o = over.iloc[0]
+                top_u = under.iloc[0]
+                move = min(abs(float(top_o["Écart (€)"])), abs(float(top_u["Écart (€)"])))
+                if move >= 1:
+                    st.info(
+                        f"Piste simple : déplacer environ **{move:,.0f} €** de "
+                        f"**{top_o['Zone']}** → **{top_u['Zone']}** "
+                        f"(ordre de grandeur, hors fiscalité / frais).".replace(",", " ")
                     )
-        with c_under:
-            st.markdown("**Sous-pondéré** (renforcer / acheter vers cible)")
-            if under.empty:
-                st.caption("Aucun écart significatif")
-            else:
-                for _, row in under.iterrows():
-                    st.markdown(
-                        f"- **{row['Zone']}** : "
-                        f"{row['Écart (pts)']:.1f} pts · "
-                        f"**{abs(row['Écart (€)']):,.0f} €** à ajouter"
-                        .replace(",", " ")
-                    )
+            elif g.empty:
+                st.success("Allocation alignée sur les cibles (±1 €).")
+        else:
+            st.caption("Pas assez de données pour calculer les écarts.")
+    except Exception as e:
+        st.caption(f"Écarts d'allocation indisponibles : {e}")
 
-        # Synthèse one-liner
-        if not over.empty and not under.empty:
-            top_o = over.iloc[0]
-            top_u = under.iloc[0]
-            move = min(abs(float(top_o["Écart (€)"])), abs(float(top_u["Écart (€)"])))
-            if move >= 1:
-                st.info(
-                    f"Piste simple : déplacer environ **{move:,.0f} €** de "
-                    f"**{top_o['Zone']}** → **{top_u['Zone']}** "
-                    f"(ordre de grandeur, hors fiscalité / frais)."
-                    .replace(",", " ")
-                )
-        elif g.empty:
-            st.success("Allocation alignée sur les cibles (±1 €).")
-    else:
-        st.caption("Pas assez de données pour calculer les écarts.")
-except Exception as e:
-    st.caption(f"Écarts d'allocation indisponibles : {e}")
-
-st.markdown("")
-render_geo_section(
-    all_open,
-    fe_valo=per_m.get("fe_valo", 0),
-    title="Exposition par zone (cible = moyenne pondérée PEA/PER/CTO)",
-    enveloppe="GLOBAL",
-    targets=_global_targets,
-)
+    render_geo_section(
+        all_open,
+        fe_valo=per_m.get("fe_valo", 0),
+        title="Exposition par zone (cible = moyenne pondérée PEA/PER/CTO)",
+        enveloppe="GLOBAL",
+        targets=_global_targets,
+    )
