@@ -505,8 +505,39 @@ with st.expander("📈 Évolution & répartition", expanded=True):
     pv = hist["portfolio_value"]
     inv = hist["invested_cumul"]
 
+    # Ajoute l'épargne de sécurité (livrets) à l'évolution
+    from core.portfolio import process_livrets as _proc_liv
+    _liv_ops = list((st.session_state.get("livrets") or {}).get("txs") or [])
+    if _liv_ops:
+        _dates = sorted({o["date"] for o in _liv_ops if o.get("date")})
+        _liv_vals = []
+        _liv_idx = []
+        for _d in _dates:
+            _sub = [o for o in _liv_ops if o.get("date") and o["date"] <= _d]
+            _by = _proc_liv(_sub)
+            _liv_vals.append(sum(v.get("valo", 0) for v in _by.values()))
+            _liv_idx.append(pd.Timestamp(_d))
+        if _liv_vals:
+            _liv_s = pd.Series(_liv_vals, index=pd.DatetimeIndex(_liv_idx)).sort_index()
+            # prolonger jusqu'à aujourd'hui
+            _today = pd.Timestamp(datetime.now().date())
+            if _liv_s.index[-1] < _today:
+                _liv_s.loc[_today] = float(_liv_s.iloc[-1])
+                _liv_s = _liv_s.sort_index()
+            if pv is not None and not pv.empty:
+                _idx = pv.index.union(_liv_s.index)
+                _pv2 = pv.reindex(_idx).ffill().fillna(0)
+                _inv2 = inv.reindex(_idx).ffill().fillna(0) if inv is not None and not inv.empty else _pv2 * 0
+                _liv2 = _liv_s.reindex(_idx).ffill().fillna(0)
+                pv = _pv2 + _liv2
+                inv = _inv2 + _liv2
+            else:
+                pv = _liv_s.copy()
+                inv = _liv_s.copy()
+
     with left:
         st.markdown("**Évolution du patrimoine**")
+        st.caption("Titres + fonds euros (via historique) + **livrets** (épargne de sécurité).")
         from core.config import BENCHMARKS
         from core.prices import rebased_benchmark
         bench_label = st.selectbox(
@@ -601,23 +632,34 @@ with st.expander("📈 Évolution & répartition", expanded=True):
 
     with right:
         st.markdown("**Répartition par enveloppe**")
-        env_labels = ["PEA", "PER", "CTO"]
+        env_labels = ["PEA", "PER", "CTO", "Livrets"]
         env_vals = [
-            pea_m["valo_titres"],
-            per_m["valo_titres"] + per_m["fe_valo"],
-            cto_m["valo_titres"],
+            pea_m["valo_titres"] + (pea_m.get("flow") or {}).get("cash", 0),
+            per_m["valo_titres"] + per_m["fe_valo"] + (per_m.get("flow") or {}).get("cash", 0),
+            cto_m["valo_titres"] + (cto_m.get("flow") or {}).get("cash", 0),
+            float(tot_livrets or 0),
         ]
-        if sum(env_vals) > 0:
+        # ne garder que les parts > 0 pour un camembert lisible
+        _pairs = [(l, v) for l, v in zip(env_labels, env_vals) if v and v > 0]
+        if _pairs:
+            env_labels, env_vals = zip(*_pairs)
+            env_labels, env_vals = list(env_labels), list(env_vals)
+            _colors = {
+                "PEA": ENV_COLORS.get("PEA", "#60a5fa"),
+                "PER": ENV_COLORS.get("PER", "#f59e0b"),
+                "CTO": ENV_COLORS.get("CTO", "#34d399"),
+                "Livrets": ENV_COLORS.get("LIVRETS", "#a78bfa"),
+            }
             fig_pie = go.Figure(data=[go.Pie(
                 labels=env_labels, values=env_vals, hole=0.62,
-                marker=dict(colors=[ENV_COLORS["PEA"], ENV_COLORS["PER"], ENV_COLORS["CTO"]]),
+                marker=dict(colors=[_colors.get(l, "#888") for l in env_labels]),
                 textinfo="label+percent", textfont=dict(size=12, color="#e5e7eb"),
                 hovertemplate="%{label}<br>%{value:,.0f} €<extra></extra>",
             )])
             fig_pie.update_layout(**PLOTLY_LAYOUT, height=340, showlegend=False)
             total_txt = f"{sum(env_vals):,.0f} €".replace(",", " ")
             fig_pie.add_annotation(
-                text=f"<b>{total_txt}</b><br><span style='font-size:11px;color:#9ca3af'>titres+FE</span>",
+                text=f"<b>{total_txt}</b><br><span style='font-size:11px;color:#9ca3af'>patrimoine</span>",
                 x=0.5, y=0.5, showarrow=False, font=dict(size=15, color="#f9fafb"),
             )
             st.plotly_chart(fig_pie, use_container_width=True)

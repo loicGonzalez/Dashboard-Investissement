@@ -1,8 +1,8 @@
 """Import PDF / CSV / saisie manuelle — persistance SQLite."""
-import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from core.state import (
