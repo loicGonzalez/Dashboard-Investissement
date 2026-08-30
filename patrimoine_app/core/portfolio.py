@@ -394,3 +394,31 @@ def render_performance_cards(portfolio_value):
             delta=f"{d_pct:+.2f}%",
             positive=positive,
         )
+
+
+def cash_sanity_check(flow: dict, tolerance: float = 1.0) -> dict | None:
+    """
+    Si les apports viennent du CSV liquidité, le cash estimé devrait
+    coller au solde réel du compte (souvent 0).
+    Retourne un dict d'alerte ou None si OK / non applicable.
+    """
+    if not flow:
+        return None
+    if flow.get("apports_source") != "liquidite":
+        return None
+    try:
+        cash = float(flow.get("cash") or 0)
+    except (TypeError, ValueError):
+        return None
+    if abs(cash) <= float(tolerance):
+        return None
+    return {
+        "cash": round(cash, 2),
+        "tolerance": tolerance,
+        "message": (
+            f"Cash estimé = {cash:+.2f} € alors qu'un journal liquidité est chargé "
+            f"(seuil ±{tolerance:.0f} €). Le fichier est peut-être incomplet, "
+            f"ou d'anciennes lignes cash n'ont pas été purgées : "
+            f"réimporte le CSV liquidité PEA (Import)."
+        ),
+    }

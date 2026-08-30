@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.state import enrich, metrics_for, get_history
+from core.portfolio import cash_sanity_check
 from core.style import kpi_card, fmt_eur, PLOTLY_LAYOUT, kpi_legend, empty_state
 
 
@@ -80,6 +81,11 @@ def render_envelope_detail(title, env_key, show_fe=False):
             "<b>PV latente</b> (onglet Évolution) = valo titres − investi des positions ouvertes.",
             "<b>Perf hors apports</b> = variation de marché sur une période, hors versements.",
         ])
+
+    # Alerte écart cash (liquidité)
+    _cash_alert = cash_sanity_check(m.get("flow") or {})
+    if _cash_alert:
+        st.warning(_cash_alert["message"])
 
     # Alertes cours manquants
     try:

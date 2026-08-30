@@ -17,7 +17,7 @@ def render_sidebar(active: str = "home") -> None:
         """
         <div style="padding:0.2rem 0 0.8rem 0;">
           <div style="font-size:1.15rem;font-weight:700;color:#f9fafb;letter-spacing:-0.02em;">
-            ◆ Patrimoine
+            Patrimoine
           </div>
           <div style="font-size:0.78rem;color:#6b7280;margin-top:0.15rem;">
             PEA · PER · CTO · local

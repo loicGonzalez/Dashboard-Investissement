@@ -40,7 +40,7 @@ from core.state import init_session, rebuild_portfolios, enrich, metrics_for, ge
 from core.style import inject_css, kpi_card, fmt_eur, PLOTLY_LAYOUT
 from core.config import ENV_COLORS
 from core.ui_detail import render_geo_section
-from core.portfolio import process_transactions, performance_periods
+from core.portfolio import process_transactions, performance_periods, cash_sanity_check
 
 
 # Assure portefeuilles à jour
@@ -173,6 +173,10 @@ _health = (
     '</div>'
 )
 st.markdown(_health, unsafe_allow_html=True)
+_pea_cash_alert = cash_sanity_check(pea_m.get("flow") or {})
+if _pea_cash_alert:
+    st.warning("**PEA** — " + _pea_cash_alert["message"])
+
 
 k1, k2, k3, k4, k5 = st.columns(5)
 from core.style import kpi_legend

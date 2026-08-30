@@ -5,7 +5,7 @@ from core.style import inject_css
 from core.nav import render_sidebar
 from core.ui_detail import render_envelope_detail
 
-st.set_page_config(page_title="PER — Patrimoine", page_icon="◆", layout="wide")
+st.set_page_config(page_title="PER · Patrimoine", page_icon="◆", layout="wide")
 init_session()
 inject_css()
 render_sidebar(active="per")

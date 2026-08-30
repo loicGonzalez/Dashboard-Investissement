@@ -219,6 +219,22 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
             f"PEA liquidité : {n_del} anciennes lignes cash purgées, {len(liq_rows)} flux retenus ({n_vers} versements, "
             f"apports +{tot_ap:.2f} € / retraits −{tot_ret:.2f} €), {ins} insérées DB, {sk} doublons"
         )
+
+        try:
+            from core.portfolio import compute_cash_and_contributions, cash_sanity_check
+            _flow_liq = compute_cash_and_contributions(liq_rows)
+            log.append(
+                f"PEA liquidité contrôle cash : {_flow_liq.get('cash', 0):+.2f} € "
+                f"(apports {_flow_liq.get('apports', 0):.2f} €, source {_flow_liq.get('apports_source')})"
+            )
+            _al = cash_sanity_check(_flow_liq)
+            if _al:
+                log.append("⚠ " + _al["message"])
+            else:
+                log.append("✓ Cash liquidité cohérent (≈ 0 €)")
+        except Exception as _e:
+            log.append(f"Contrôle cash liquidité indisponible : {_e}")
+
         try:
             log_import_batch(
                 enveloppe="PEA", source="CSV liquidité",
