@@ -27,36 +27,59 @@ def render_envelope_detail(title, env_key, show_fe=False):
     open_df, sold_df, summary = info["open"], info["sold"], info["summary"]
     m = metrics_for(txs, open_df, fe_by_id)
 
-    st.markdown(f"## {title}")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    kpi_card(k1, "Apports", fmt_eur(m["apports"]),
-             sub=("liquidité CSV" if m.get("flow", {}).get("apports_source") == "liquidite" else "estimé ordres"),
-             help_text="Versements nets. Priorité au CSV liquidité si importé ; sinon estimation via ordres.")
-    kpi_card(k2, "Cash estimé", fmt_eur(m["flow"]["cash"]),
-             help_text="Solde cash reconstitué (apports − achats + ventes − frais).")
-    kpi_card(k3, "Valo titres", fmt_eur(m["valo_titres"]),
-             help_text="Parts ouvertes × cours (Yahoo ou manuel).")
-    kpi_card(k4, "Patrimoine", fmt_eur(m["patrimoine"]),
-             help_text="Valo titres + cash (+ fonds euros si PER).")
+    # Hero enveloppe (style Finary)
+    _pill = {"PEA": "pill-pea", "PER": "pill-per", "CTO": "pill-cto"}.get(title, "pill-pea")
+    _delta_cls = "hero-delta-pos" if m["pv"] >= 0 else "hero-delta-neg"
+    _delta_txt = f'{m["pv"]:+,.0f} € ({m["pct"]:+.1f} %)'.replace(",", " ")
+    _src = m.get("flow", {}).get("apports_source")
+    _src_lbl = "apports liquidité" if _src == "liquidite" else "apports estimés"
+    _hero = (
+        '<div class="hero">'
+        f'<div class="hero-label"><span class="pill {_pill}">{title}</span></div>'
+        f'<div class="hero-value">{fmt_eur(m["patrimoine"])}</div>'
+        f'<div class="{_delta_cls}">{_delta_txt}</div>'
+        '<div class="hero-meta">'
+        + f'{_src_lbl} {fmt_eur(m["apports"])}'
+        + f' | valo titres {fmt_eur(m["valo_titres"])}'
+        + f' | cash {fmt_eur(m["flow"]["cash"])}'
+        + "</div></div>"
+    )
+    st.markdown(_hero, unsafe_allow_html=True)
+
+    k1, k2, k3, k4, k5 = st.columns(5)
     kpi_card(
-        k5, "Plus-value",
+        k1, "Apports", fmt_eur(m["apports"]),
+        sub=("liquidité CSV" if _src == "liquidite" else "estimé ordres"),
+        help_text="Versements nets. Priorité au CSV liquidité si importé ; sinon estimation via ordres.",
+    )
+    kpi_card(
+        k2, "Cash estimé", fmt_eur(m["flow"]["cash"]),
+        help_text="Solde cash reconstitué. Avec CSV liquidité = journal de caisse complet.",
+    )
+    kpi_card(
+        k3, "Valo titres", fmt_eur(m["valo_titres"]),
+        help_text="Parts ouvertes × cours (Yahoo ou manuel).",
+    )
+    kpi_card(
+        k4, "Plus-value",
         fmt_eur(m["pv"], signed=True),
         delta=f'{m["pct"]:+.1f}%',
         positive=m["pv"] >= 0,
-        help_text="Patrimoine − Apports. Pas la même chose que PV latente titres.",
+        help_text="Patrimoine − Apports (cash et fonds euros inclus).",
     )
     kpi_card(
-        k6, "Frais d'achat",
+        k5, "Frais d'achat",
         fmt_eur(m.get("frais_achat", 0)),
         sub="cumul ACHAT",
         positive=False,
         help_text="Cumul des frais d'exécution sur les ACHAT.",
     )
-    kpi_legend([
-        f"<b>{title}</b> — <b>Plus-value</b> = patrimoine − apports.",
-        "<b>PV latente</b> (onglet Évolution) = valo titres − investi des positions ouvertes.",
-        "<b>Perf hors apports</b> = variation de marché sur une période, hors versements.",
-    ])
+    with st.expander("Légende des indicateurs", expanded=False):
+        kpi_legend([
+            f"<b>{title}</b> — <b>Plus-value</b> = patrimoine − apports.",
+            "<b>PV latente</b> (onglet Évolution) = valo titres − investi des positions ouvertes.",
+            "<b>Perf hors apports</b> = variation de marché sur une période, hors versements.",
+        ])
 
     # Alertes cours manquants
     try:
@@ -72,14 +95,16 @@ def render_envelope_detail(title, env_key, show_fe=False):
     except Exception:
         pass
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Synthèse", "Opérations", "Évolution", "Export"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Positions", "Mouvements", "Performance", "Export"])
 
     with tab1:
         if open_df is not None and not open_df.empty:
-            st.markdown("**Positions ouvertes**")
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.markdown("#### Positions ouvertes")
             if open_df is not None and not open_df.empty and open_df["Valorisation (€)"].isna().all():
                 st.warning("Cours Yahoo indisponibles : valo à 0. Vérifie la connexion internet / tickers, ou saisis un cours manuel (page Import). Le fallback dernier cours d'opération devrait s'appliquer au prochain refresh.")
             st.dataframe(open_df, use_container_width=True, hide_index=True)
+            st.markdown("</div>", unsafe_allow_html=True)
         if sold_df is not None and not sold_df.empty:
             with st.expander(f"Positions soldées ({len(sold_df)})"):
                 st.dataframe(sold_df, use_container_width=True, hide_index=True)
@@ -93,7 +118,7 @@ def render_envelope_detail(title, env_key, show_fe=False):
                 "Apports nets": round(v["apports"], 2),
                 "Valorisation": round(v["valo"], 2),
             } for fid, v in fe_by_id.items()]
-            st.markdown("**Fonds euros**")
+            st.markdown("#### Fonds euros")
             st.dataframe(pd.DataFrame(fe_rows), use_container_width=True, hide_index=True)
 
         fe_v = sum(v["valo"] for v in (fe_by_id or {}).values()) if show_fe else 0.0
@@ -113,7 +138,7 @@ def render_envelope_detail(title, env_key, show_fe=False):
         inv = hist["invested_cumul"]
         if not pv.empty:
             # —— Bloc A : PV latente (alignée KPI) ——
-            st.markdown("**A · PV latente (aujourd’hui)**")
+            st.markdown("#### PV latente")
             st.caption(
                 "Valorisation actuelle − coût de revient des positions encore ouvertes "
                 "(même base que le KPI Plus-value)."
@@ -143,7 +168,7 @@ def render_envelope_detail(title, env_key, show_fe=False):
 
             st.markdown("")
             # —— Bloc B : perf par période ——
-            st.markdown("**B · Perf hors apports (par période)**")
+            st.markdown("#### Perf hors apports")
             st.caption(
                 "(Δ valo − Δ investi) / valo début de période. "
                 "Les versements ne comptent pas comme performance. Pas un TRI exact."
