@@ -132,20 +132,33 @@ _tgt_ok = all(
     for e in ("PEA", "PER", "CTO")
 )
 
-# Header + chips
-h1, h2 = st.columns([3, 1])
-with h1:
-    st.markdown("## ◆ Patrimoine")
-    st.markdown(chip_1j + chip_1s, unsafe_allow_html=True)
-    st.caption(f"Vue globale · {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-with h2:
-    st.markdown(
-        '<div style="text-align:right;padding-top:0.6rem;">'
-        '<span class="pill pill-pea">PEA</span> '
-        '<span class="pill pill-per">PER</span> '
-        '<span class="pill pill-cto">CTO</span></div>',
-        unsafe_allow_html=True,
-    )
+# Hero style Finary
+_perf_1j = perf_map.get("1 jour") or {}
+_d1 = _perf_1j.get("delta_eur") if _perf_1j.get("available") else None
+_p1 = _perf_1j.get("delta_pct") if _perf_1j.get("available") else None
+if _d1 is not None:
+    _hero_delta_cls = "hero-delta-pos" if _d1 >= 0 else "hero-delta-neg"
+    _hero_delta = f"{_d1:+,.0f} €".replace(",", " ")
+    if _p1 is not None:
+        _hero_delta += f"  ({_p1:+.2f} %)"
+else:
+    _hero_delta_cls = "hero-delta-pos" if tot_pv >= 0 else "hero-delta-neg"
+    _hero_delta = f"{tot_pv:+,.0f} € ({tot_pct:+.1f} %) depuis les apports".replace(",", " ")
+
+_hero_html = (
+    '<div class="hero">'
+    '<div class="hero-label">Patrimoine total</div>'
+    '<div class="hero-value">' + fmt_eur(tot_patrimoine) + '</div>'
+    '<div class="' + _hero_delta_cls + '">' + _hero_delta + '</div>'
+    '<div class="hero-meta">'
+    + "Apports " + fmt_eur(tot_apports)
+    + " | PV " + fmt_eur(tot_pv, signed=True)
+    + " | " + datetime.now().strftime("%d/%m/%Y %H:%M")
+    + "</div></div>"
+)
+st.markdown(_hero_html, unsafe_allow_html=True)
+st.markdown(chip_1j + chip_1s, unsafe_allow_html=True)
+st.markdown("")
 
 # Bandeau santé
 cls_cours = "health-ok" if n_miss == 0 else "health-bad"
