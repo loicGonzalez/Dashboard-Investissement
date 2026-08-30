@@ -407,3 +407,129 @@ def split_uc_and_fe(transactions: list):
     return uc, fe
 
 
+
+def _classify_liquidity_label(label: str, sense: str) -> tuple[str, str]:
+    """
+    Retourne (type, role) :
+      type : VERSEMENT | RETRAIT | CASH_IN | CASH_OUT
+      role : apport | cash (mouvement interne titres/frais)
+    sense : "in" (crédit) | "out" (débit)
+    """
+    u = (label or "").upper()
+
+    # Frais
+    if any(k in u for k in ("COM. DE GEST", "COM DE GEST", "FRAIS BANCAIRES", "FRAIS DE")):
+        return ("CASH_OUT", "cash") if sense == "out" else ("CASH_IN", "cash")
+
+    # Souscriptions / achats titres
+    if any(k in u for k in ("SOUSC", "SOUSCRIPTION", "ACHAT")):
+        return ("CASH_OUT", "cash") if sense == "out" else ("CASH_IN", "cash")
+
+    # Rachats → retour cash
+    if "RACHAT" in u:
+        return ("CASH_IN", "cash") if sense == "in" else ("CASH_OUT", "cash")
+
+    # Apports / sorties externes
+    if any(k in u for k in ("OUVERTURE", "VERSEMENT", "REGULARISATION")):
+        return ("VERSEMENT", "apport") if sense == "in" else ("RETRAIT", "apport")
+
+    if u.startswith("VIR") or "VIREMENT" in u:
+        return ("VERSEMENT", "apport") if sense == "in" else ("RETRAIT", "apport")
+
+    # Défaut : suivre le sens (évite d'ignorer des lignes)
+    if sense == "in":
+        return ("CASH_IN", "cash")
+    return ("CASH_OUT", "cash")
+
+
+def parse_liquidity_csv(uploaded_file) -> list:
+    """
+    Parse export liquidité PEA (CIC ou modèle).
+
+    Colonnes : date, operation|libelle, debit, credit [, montant]
+
+    - VERSEMENT / RETRAIT : apports nets (KPI Apports)
+    - CASH_IN / CASH_OUT : mouvements caisse (SOUSC, ACHAT, RACHAT, frais)
+    """
+    try:
+        df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
+    except Exception:
+        uploaded_file.seek(0)
+        try:
+            df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig")
+        except Exception:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file, sep=",", encoding="utf-8")
+
+    df.columns = [str(c).replace("\ufeff", "").strip().lower() for c in df.columns]
+    rename = {}
+    for c in list(df.columns):
+        if c in ("libelle", "libellé", "label", "intitule", "intitulé", "description", "opé", "ope", "opération"):
+            rename[c] = "operation"
+        if c == "crédit":
+            rename[c] = "credit"
+    if rename:
+        df = df.rename(columns=rename)
+
+    if "date" not in df.columns:
+        st.error(f"CSV liquidité : colonne date manquante. Colonnes: {list(df.columns)}")
+        return []
+
+    has_dc = "debit" in df.columns or "credit" in df.columns
+
+    transactions = []
+    for _, row in df.iterrows():
+        try:
+            date_val = row["date"]
+            if isinstance(date_val, str):
+                date = None
+                for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
+                    try:
+                        date = datetime.strptime(date_val.strip()[:10], fmt)
+                        break
+                    except ValueError:
+                        continue
+                if date is None:
+                    continue
+            else:
+                date = pd.to_datetime(date_val).to_pydatetime()
+
+            label = str(row.get("operation") or "").strip() if "operation" in df.columns else ""
+            debit = parse_fr_number(row.get("debit")) if "debit" in df.columns else None
+            credit = parse_fr_number(row.get("credit")) if "credit" in df.columns else None
+            montant = parse_fr_number(row.get("montant")) if "montant" in df.columns else None
+
+            if has_dc:
+                if credit and credit > 0:
+                    amount, sense = credit, "in"
+                elif debit and debit > 0:
+                    amount, sense = debit, "out"
+                else:
+                    continue
+            elif montant is not None:
+                amount = abs(montant)
+                sense = "in" if montant >= 0 else "out"
+            else:
+                continue
+
+            typ, role = _classify_liquidity_label(label, sense)
+            transactions.append({
+                "date": date,
+                "type": typ,
+                "quantite": None,
+                "valeur": label or typ,
+                "isin": None,
+                "cours": None,
+                "solde": None,
+                "brut": None,
+                "frais": 0.0,
+                "montant": round(float(amount), 2),
+                "source": "CSV liquidité",
+                "kind": "cash",
+                "role": role,
+                "no_cash": False,
+            })
+        except Exception:
+            continue
+
+    return transactions

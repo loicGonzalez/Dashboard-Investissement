@@ -30,7 +30,8 @@ def render_envelope_detail(title, env_key, show_fe=False):
     st.markdown(f"## {title}")
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     kpi_card(k1, "Apports", fmt_eur(m["apports"]),
-             help_text="Versements nets estimés sur cette enveloppe.")
+             sub=("liquidité CSV" if m.get("flow", {}).get("apports_source") == "liquidite" else "estimé ordres"),
+             help_text="Versements nets. Priorité au CSV liquidité si importé ; sinon estimation via ordres.")
     kpi_card(k2, "Cash estimé", fmt_eur(m["flow"]["cash"]),
              help_text="Solde cash reconstitué (apports − achats + ventes − frais).")
     kpi_card(k3, "Valo titres", fmt_eur(m["valo_titres"]),
@@ -161,6 +162,15 @@ def render_envelope_detail(title, env_key, show_fe=False):
                     positive=row["delta_eur"] >= 0,
                 )
             st.markdown("")
+            from core.config import BENCHMARKS
+            from core.prices import rebased_benchmark
+            bench_label = st.selectbox(
+                "Benchmark",
+                list(BENCHMARKS.keys()),
+                index=0,
+                key=f"bench_{env_key}",
+                help="Courbe rebasée sur la 1re valorisation de l'enveloppe.",
+            )
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=pv.index, y=pv, name="Valorisation",
@@ -171,6 +181,17 @@ def render_envelope_detail(title, env_key, show_fe=False):
                 x=inv.index, y=inv, name="Investi",
                 line=dict(color="#a78bfa", width=2, dash="dot"),
             ))
+            ticker = BENCHMARKS.get(bench_label)
+            if ticker:
+                try:
+                    bench_s = rebased_benchmark(pv, ticker)
+                    if bench_s is not None and not bench_s.empty:
+                        fig.add_trace(go.Scatter(
+                            x=bench_s.index, y=bench_s, name=bench_label,
+                            line=dict(color="#fbbf24", width=2, dash="dash"),
+                        ))
+                except Exception:
+                    pass
             fig.update_layout(
                 **PLOTLY_LAYOUT, height=380, hovermode="x unified",
                 xaxis=dict(showgrid=False),

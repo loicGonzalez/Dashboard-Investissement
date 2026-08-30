@@ -32,6 +32,7 @@ def init_session():
         "cto_files_data": [],
         "per_csv_data": [],
         "per_manual": [],
+        "pea_liquidity": [],
         "manual_prices": {},
         "histories": {},
         "pea_files_names": [],
@@ -61,9 +62,21 @@ def load_from_db():
     pea = load_operations("PEA")
     per = load_operations("PER")
     cto = load_operations("CTO")
-    # Sépare sources pour stats ; rebuild_portfolios fusionne
-    st.session_state["pea_files_data"] = [o for o in pea if "CSV" not in str(o.get("source", ""))]
-    st.session_state["pea_csv_data"] = [o for o in pea if "CSV" in str(o.get("source", ""))]
+
+    def _is_liq(o):
+        src = str(o.get("source") or "").lower()
+        return o.get("kind") == "cash" or "liquidit" in src
+
+    def _is_csv_titres(o):
+        src = str(o.get("source") or "")
+        return "CSV" in src and not _is_liq(o)
+
+    # Sépare PDF / CSV titres / liquidité
+    st.session_state["pea_files_data"] = [
+        o for o in pea if "CSV" not in str(o.get("source", "")) and not _is_liq(o)
+    ]
+    st.session_state["pea_csv_data"] = [o for o in pea if _is_csv_titres(o)]
+    st.session_state["pea_liquidity"] = [o for o in pea if _is_liq(o)]
     st.session_state["per_csv_data"] = [o for o in per if "Manuel" not in str(o.get("source", ""))]
     st.session_state["per_manual"] = [o for o in per if "Manuel" in str(o.get("source", ""))]
     st.session_state["cto_files_data"] = cto
@@ -104,6 +117,7 @@ def rebuild_portfolios():
     # PEA
     pea = list(st.session_state.get("pea_files_data", []))
     pea += list(st.session_state.get("pea_csv_data", []))
+    pea += list(st.session_state.get("pea_liquidity", []))
     pea_df, pea_by_isin = process_transactions(pea)
 
     # CTO

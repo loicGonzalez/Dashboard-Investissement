@@ -38,8 +38,16 @@ def process_transactions(transactions: list):
     by_isin = defaultdict(lambda: {"name": "", "parts": 0.0, "investi": 0.0, "ops": []})
 
     for t in transactions:
-        isin = t["isin"]
-        qty = float(t["quantite"])
+        # Flux cash purs (liquidité) : pas de ligne titre
+        if t.get("kind") == "cash" or t.get("type", "").upper() in (
+            "VERSEMENT", "RETRAIT", "OUVERTURE", "REGULARISATION"
+        ):
+            if not t.get("isin"):
+                continue
+        isin = t.get("isin")
+        if not isin:
+            continue
+        qty = float(t.get("quantite") or 0)
         montant = t.get("montant") or t.get("debit") or 0.0
         typ = t.get("type", "ACHAT").upper()
 
@@ -66,34 +74,75 @@ def process_transactions(transactions: list):
     return df, dict(by_isin)
 
 def compute_cash_and_contributions(transactions: list) -> dict:
-    """Simule la trésorerie et estime les apports externes."""
+    """
+    Trésorerie + apports.
+
+    Si des flux kind=cash (CSV liquidité) sont présents :
+      - apports = VERSEMENT − RETRAIT
+      - cash = journal complet liquidité (VERSEMENT/CASH_IN − RETRAIT/CASH_OUT)
+        sans rejouer les ACHAT/VENTE titres (évite le double comptage).
+
+    Sinon (pas de liquidité) :
+      - estimation classique via déficit de cash sur les ACHAT.
+    """
     ops = sorted(transactions, key=lambda x: x["date"])
     cash = 0.0
-    apports = 0.0
+    apports_estimes = 0.0
+    apports_liquidite = 0.0
+    has_liquidite = False
     total_achats = 0.0
     total_ventes = 0.0
+
+    for op in ops:
+        if op.get("kind") == "cash":
+            has_liquidite = True
+            break
 
     for op in ops:
         montant = float(op.get("montant") or 0.0)
         typ = op.get("type", "ACHAT").upper()
         no_cash = bool(op.get("no_cash"))
+        kind = op.get("kind") or ""
+
+        if kind == "cash":
+            if typ == "VERSEMENT":
+                apports_liquidite += montant
+                cash += montant
+            elif typ == "RETRAIT":
+                apports_liquidite -= montant
+                cash -= montant
+            elif typ == "CASH_IN":
+                cash += montant
+            elif typ == "CASH_OUT":
+                cash -= montant
+            continue
+
+        # Sans journal liquidité : simuler via ordres titres
+        if has_liquidite:
+            # compta achats/ventes stats only
+            if typ == "ACHAT":
+                total_achats += montant
+            elif typ == "VENTE" and not no_cash:
+                total_ventes += montant
+            continue
 
         if typ == "ACHAT":
             total_achats += montant
             cash -= montant
             if cash < -1e-9:
-                apports += -cash
+                apports_estimes += -cash
                 cash = 0.0
         elif typ == "BONUS":
-            pass  # actions gratuites : pas de mouvement de cash
+            pass
         elif typ == "VENTE":
-            # Frais de gestion (no_cash) : réduit les parts mais ne génère pas de cash
             if not no_cash:
                 total_ventes += montant
                 cash += montant
 
+    apports = apports_liquidite if has_liquidite else apports_estimes
     return {
         "apports": round(apports, 2),
+        "apports_source": "liquidite" if has_liquidite else "estime",
         "cash": round(cash, 2),
         "total_achats": round(total_achats, 2),
         "total_ventes": round(total_ventes, 2),

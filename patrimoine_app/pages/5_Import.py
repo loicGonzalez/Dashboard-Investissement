@@ -16,6 +16,7 @@ from core.parsers import (
     extract_transaction_from_pdf,
     extract_transaction_from_traderepublic,
     parse_csv_transactions,
+    parse_liquidity_csv,
 )
 from core.import_log import log_import_batch, load_journal, clear_journal, missing_price_alerts_from_open_df
 from core.db import (
@@ -26,6 +27,7 @@ from core.db import (
     init_db,
     backup_db_bytes,
     restore_db_from_bytes,
+    delete_cash_operations,
 )
 
 st.set_page_config(page_title="Import — Patrimoine", page_icon="📥", layout="wide")
@@ -54,6 +56,11 @@ with left:
         "Avis CIC (PDF)", type=["pdf"], accept_multiple_files=True, key="imp_pea_pdf"
     )
     pea_csv = st.file_uploader("CSV opérations PEA", type=["csv"], key="imp_pea_csv")
+    pea_liq = st.file_uploader(
+        "CSV liquidité PEA (virements / versements / régularisations)",
+        type=["csv"], key="imp_pea_liq",
+    )
+    st.caption("Modèle : data/modele_liquidite_pea.csv — colonnes date;operation;debit;credit")
     pea_mode = st.radio(
         "Mode PEA",
         ["Fusionner (anti-doublon)", "Remplacer tout le PEA"],
@@ -174,7 +181,7 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
             failed_files=failed_names, mode=mflag,
         )
 
-    # PEA CSV
+    # PEA CSV opérations titres
     if pea_csv is not None:
         rows = parse_csv_transactions(pea_csv)
         for r in rows:
@@ -185,11 +192,42 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
         n_ok += len(rows)
         fname = getattr(pea_csv, "name", "pea.csv")
         log.append(f"PEA CSV : {ins} insérées, {sk} doublons ({len(rows)} lignes lues)")
-        log_import_batch(
-            enveloppe="PEA", source="CSV", files=[fname],
-            inserted=ins, duplicates=sk, failed=0, mode=m,
-            extra=f"{len(rows)} lignes parsées",
+        try:
+            log_import_batch(
+                enveloppe="PEA", source="CSV", files=[fname],
+                inserted=ins, duplicates=sk, failed=0, mode=m,
+                extra=f"{len(rows)} lignes parsées",
+            )
+        except Exception:
+            pass
+
+    # PEA CSV liquidité (apports + journal de caisse complet)
+    if pea_liq is not None:
+        liq_rows = parse_liquidity_csv(pea_liq)
+        for r in liq_rows:
+            r["source"] = r.get("source") or "CSV liquidité"
+            r["kind"] = "cash"
+        # Remplace l'ancien journal liquidité (évite VERSEMENT sans CASH_OUT)
+        n_del = delete_cash_operations("PEA")
+        ins, sk = persist_enveloppe(liq_rows, "PEA", "merge")
+        st.session_state["pea_liquidity"] = liq_rows
+        n_ok += len(liq_rows)
+        n_vers = sum(1 for r in liq_rows if r.get("type") == "VERSEMENT")
+        tot_ap = sum(r["montant"] for r in liq_rows if r.get("type") == "VERSEMENT")
+        tot_ret = sum(r["montant"] for r in liq_rows if r.get("type") == "RETRAIT")
+        log.append(
+            f"PEA liquidité : {n_del} anciennes lignes cash purgées, {len(liq_rows)} flux retenus ({n_vers} versements, "
+            f"apports +{tot_ap:.2f} € / retraits −{tot_ret:.2f} €), {ins} insérées DB, {sk} doublons"
         )
+        try:
+            log_import_batch(
+                enveloppe="PEA", source="CSV liquidité",
+                files=[getattr(pea_liq, "name", "liquidite.csv")],
+                inserted=ins, duplicates=sk, failed=0, mode=mode_flag(pea_mode),
+                extra=f"apports +{tot_ap:.2f} €",
+            )
+        except Exception:
+            pass
 
     # CTO PDF
     if cto_pdfs:

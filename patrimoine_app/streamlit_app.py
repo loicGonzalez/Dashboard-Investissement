@@ -469,6 +469,15 @@ with st.expander("📈 Évolution & répartition", expanded=True):
 
     with left:
         st.markdown("**Évolution du patrimoine**")
+        from core.config import BENCHMARKS
+        from core.prices import rebased_benchmark
+        bench_label = st.selectbox(
+            "Benchmark",
+            list(BENCHMARKS.keys()),
+            index=1,  # S&P 500 CSPX par défaut
+            key="bench_global",
+            help="Courbe rebasée sur ta 1re valorisation (comparaison indicative, pas un TRI).",
+        )
         fig = go.Figure()
         if not pv.empty:
             fig.add_trace(go.Scatter(
@@ -482,6 +491,34 @@ with st.expander("📈 Évolution & répartition", expanded=True):
                 line=dict(color="#a78bfa", width=2, dash="dot"),
                 hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
             ))
+            ticker = BENCHMARKS.get(bench_label)
+            if ticker:
+                try:
+                    bench_s = rebased_benchmark(pv, ticker)
+                    if bench_s is not None and not bench_s.empty:
+                        fig.add_trace(go.Scatter(
+                            x=bench_s.index, y=bench_s, name=bench_label,
+                            line=dict(color="#fbbf24", width=2, dash="dash"),
+                            hovertemplate="%{x|%d/%m/%Y}<br>%{y:,.0f} €<extra></extra>",
+                        ))
+                        # écart final
+                        try:
+                            v_end = float(pv.dropna().iloc[-1])
+                            b_end = float(bench_s.reindex(pv.dropna().index).ffill().iloc[-1])
+                            if b_end > 0:
+                                gap = v_end - b_end
+                                gap_pct = 100 * gap / b_end
+                                st.caption(
+                                    f"Vs benchmark (rebasé) : **{gap:+,.0f} €** ({gap_pct:+.1f} %) "
+                                    f"— indicatif, sans caler chaque versement sur l'indice."
+                                    .replace(",", " ")
+                                )
+                        except Exception:
+                            pass
+                    else:
+                        st.caption(f"Benchmark {ticker} : pas de série disponible.")
+                except Exception as e:
+                    st.caption(f"Benchmark indisponible : {e}")
         fig.update_layout(
             **PLOTLY_LAYOUT, height=340, hovermode="x unified",
             xaxis=dict(showgrid=False, zeroline=False),

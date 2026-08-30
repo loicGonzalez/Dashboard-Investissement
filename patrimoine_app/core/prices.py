@@ -125,3 +125,72 @@ def get_historical_prices(ticker: str, start: datetime, end: datetime):
         return s
     except Exception:
         return pd.Series(dtype=float)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_benchmark_series(ticker: str, start: str, end: str | None = None) -> pd.Series:
+    """
+    Série Close journalière pour un ticker Yahoo.
+    start/end : YYYY-MM-DD
+    """
+    if not ticker:
+        return pd.Series(dtype=float)
+    try:
+        kwargs = {"start": start}
+        if end:
+            kwargs["end"] = end
+        df = yf.download(ticker, progress=False, auto_adjust=True, **kwargs)
+        if df is None or df.empty:
+            return pd.Series(dtype=float)
+        close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        close = close.dropna()
+        close.index = pd.to_datetime(close.index).tz_localize(None)
+        return close.astype(float)
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def rebased_benchmark(portfolio_value: pd.Series, ticker: str) -> pd.Series | None:
+    """
+    Aligne un benchmark sur la 1re valeur non nulle du portefeuille.
+    bench_t = portfolio_start * (price_t / price_start)
+    """
+    if portfolio_value is None or getattr(portfolio_value, "empty", True) or not ticker:
+        return None
+    pv = portfolio_value.dropna().sort_index()
+    if pv.empty:
+        return None
+    start = pv.index.min()
+    start_str = pd.Timestamp(start).strftime("%Y-%m-%d")
+    end_str = pd.Timestamp(pv.index.max()).strftime("%Y-%m-%d")
+    # un peu de marge avant
+    start_fetch = (pd.Timestamp(start) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+    bench = get_benchmark_series(ticker, start_fetch, end_str)
+    if bench is None or bench.empty:
+        return None
+    # point de référence : premier cours bench >= start
+    ref = bench[bench.index >= pd.Timestamp(start)]
+    if ref.empty:
+        ref = bench
+    p0 = float(ref.iloc[0])
+    if p0 <= 0:
+        return None
+    v0 = float(pv.iloc[0])
+    # si première valo quasi 0, prendre première > 0
+    nz = pv[pv > 0]
+    if not nz.empty:
+        v0 = float(nz.iloc[0])
+        start_align = nz.index[0]
+        ref = bench[bench.index >= pd.Timestamp(start_align)]
+        if ref.empty:
+            return None
+        p0 = float(ref.iloc[0])
+        if p0 <= 0:
+            return None
+    scaled = bench / p0 * v0
+    # réindexer sur les dates du portefeuille (ffill)
+    scaled = scaled.reindex(pv.index.union(scaled.index)).ffill()
+    scaled = scaled.reindex(pv.index).ffill()
+    return scaled.dropna()

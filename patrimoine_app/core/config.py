@@ -28,3 +28,15 @@ ENV_COLORS = {
     "PER": "#f59e0b",
     "CTO": "#10b981",
 }
+
+# Benchmarks pour le graphique d'évolution (Yahoo Finance)
+# Clé d'affichage → ticker Yahoo
+BENCHMARKS = {
+    "Aucun": None,
+    "S&P 500 (CSPX.L)": "CSPX.L",       # ETF Acc EUR-friendly London
+    "S&P 500 (^GSPC)": "^GSPC",
+    "MSCI World (IWDA.AS)": "IWDA.AS",   # iShares Core MSCI World Amsterdam
+    "MSCI World (SWDA.L)": "SWDA.L",
+    "Nasdaq 100 (EQQQ.L)": "EQQQ.L",
+    "EURO STOXX 50 (SX5E.DE)": "SX5E.DE",
+}

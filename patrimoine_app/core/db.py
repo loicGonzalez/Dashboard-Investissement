@@ -410,3 +410,18 @@ def restore_db_from_bytes(data: bytes, db_path: Path | None = None) -> Path:
     tmp.write_bytes(data)
     tmp.replace(path)
     return path
+
+
+def delete_cash_operations(enveloppe: str, db_path: Path | None = None) -> int:
+    """Supprime les opérations kind=cash (journal liquidité) d'une enveloppe."""
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            "DELETE FROM operations WHERE enveloppe = ? AND (kind = 'cash' OR source LIKE '%iquidité%' OR source LIKE '%iquidite%')",
+            (enveloppe,),
+        )
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        conn.close()
