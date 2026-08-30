@@ -30,7 +30,7 @@ def render_sidebar(active: str = "home") -> None:
     # Indicateurs mini si données chargées
     has = any(
         st.session_state.get(k)
-        for k in ("pea_files_data", "pea_csv_data", "cto_files_data", "per_csv_data", "per_manual")
+        for k in ("pea_files_data", "pea_csv_data", "cto_files_data", "per_csv_data", "per_manual", "livrets_data")
     )
     if has:
         pea = st.session_state.get("pea") or {}
@@ -59,6 +59,7 @@ def render_sidebar(active: str = "home") -> None:
     _link("PEA", "pages/2_PEA.py", "pea", "📘")
     _link("PER", "pages/3_PER.py", "per", "🟣")
     _link("CTO", "pages/4_CTO.py", "cto", "📗")
+    _link("Livrets", "pages/6_Livrets.py", "livrets", "🛡️")
     _link("Import", "pages/5_Import.py", "import", "📥")
 
     st.sidebar.markdown("---")

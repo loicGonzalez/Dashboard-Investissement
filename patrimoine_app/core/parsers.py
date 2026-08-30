@@ -554,3 +554,101 @@ def parse_liquidity_csv(uploaded_file) -> list:
             continue
 
     return transactions
+
+
+def parse_livrets_csv(uploaded_file) -> list:
+    """
+    CSV épargne réglementée.
+    Colonnes : date;livret;type;montant
+      livret = LA | LEP | LDDS (ou libellés)
+      type = VERSEMENT | RETRAIT | INTERETS | SOLDE
+    """
+    try:
+        df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
+    except Exception:
+        uploaded_file.seek(0)
+        try:
+            df = pd.read_csv(uploaded_file, sep=";", encoding="utf-8-sig")
+        except Exception:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file, sep=",", encoding="utf-8")
+
+    df.columns = [str(c).replace("\ufeff", "").strip().lower() for c in df.columns]
+    rename = {}
+    for c in df.columns:
+        if c in ("code", "type_livret", "produit", "compte"):
+            rename[c] = "livret"
+        if c in ("montant_eur", "amount", "valeur"):
+            rename[c] = "montant"
+    if rename:
+        df = df.rename(columns=rename)
+
+    if "date" not in df.columns or "montant" not in df.columns:
+        st.error(f"CSV livrets : colonnes date et montant requises. Colonnes: {list(df.columns)}")
+        return []
+
+    def norm_livret(x):
+        u = str(x or "").upper().strip()
+        if u in ("LA", "A", "LIVRET A", "LIVRET_A", "LIVRETA"):
+            return "LA"
+        if "LDDS" in u or u == "DD":
+            return "LDDS"
+        if "LEP" in u:
+            return "LEP"
+        return u
+
+    def norm_type(x):
+        u = str(x or "SOLDE").upper().strip()
+        if u in ("VERSEMENT", "DEPOT", "DÉPÔT", "CREDIT", "CRÉDIT"):
+            return "VERSEMENT"
+        if u in ("RETRAIT", "WITHDRAWAL", "DEBIT", "DÉBIT"):
+            return "RETRAIT"
+        if u.startswith("INTERET"):
+            return "INTERETS"
+        if u in ("SOLDE", "BALANCE", "STOCK"):
+            return "SOLDE"
+        return u
+
+    txs = []
+    for _, row in df.iterrows():
+        try:
+            date_val = row["date"]
+            if isinstance(date_val, str):
+                date = None
+                for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                    try:
+                        date = datetime.strptime(date_val.strip()[:10], fmt)
+                        break
+                    except ValueError:
+                        continue
+                if date is None:
+                    continue
+            else:
+                date = pd.to_datetime(date_val).to_pydatetime()
+
+            livret = norm_livret(row.get("livret") if "livret" in df.columns else "LA")
+            if livret not in ("LA", "LEP", "LDDS"):
+                continue
+            typ = norm_type(row.get("type") if "type" in df.columns else "SOLDE")
+            montant = parse_fr_number(row.get("montant"))
+            if montant is None or montant < 0:
+                continue
+            from core.config import LIVRET_LABELS
+            txs.append({
+                "date": date,
+                "type": typ,
+                "quantite": None,
+                "valeur": LIVRET_LABELS.get(livret, livret),
+                "isin": livret,
+                "cours": None,
+                "solde": montant if typ == "SOLDE" else None,
+                "brut": None,
+                "frais": 0.0,
+                "montant": round(montant, 2),
+                "source": "CSV livrets",
+                "kind": "livret",
+                "no_cash": False,
+            })
+        except Exception:
+            continue
+    return txs

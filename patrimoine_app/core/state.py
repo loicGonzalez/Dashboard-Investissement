@@ -10,6 +10,7 @@ from core.parsers import (
     parse_csv_transactions,
     split_uc_and_fe,
 )
+from core.portfolio import process_livrets
 from core.portfolio import (
     process_transactions,
     process_fonds_euros,
@@ -33,6 +34,7 @@ def init_session():
         "per_csv_data": [],
         "per_manual": [],
         "pea_liquidity": [],
+        "livrets_data": [],
         "ticker_overrides": {},
         "manual_prices": {},
         "histories": {},
@@ -81,6 +83,8 @@ def load_from_db():
     st.session_state["per_csv_data"] = [o for o in per if "Manuel" not in str(o.get("source", ""))]
     st.session_state["per_manual"] = [o for o in per if "Manuel" in str(o.get("source", ""))]
     st.session_state["cto_files_data"] = cto
+    liv = load_operations("LIVRETS")
+    st.session_state["livrets_data"] = liv
     st.session_state["manual_prices"] = load_manual_prices()
     st.session_state["ticker_overrides"] = load_ticker_overrides()
     st.session_state["histories"] = {}
@@ -144,6 +148,13 @@ def rebuild_portfolios():
         "by_isin": per_by_isin,
         "fe_by_id": per_fe_by_id,
         "fe_ops": per_fe_ops,
+    }
+
+    # Livrets
+    liv_ops = list(st.session_state.get("livrets_data", []))
+    st.session_state["livrets"] = {
+        "txs": liv_ops,
+        "by_code": process_livrets(liv_ops),
     }
 
 

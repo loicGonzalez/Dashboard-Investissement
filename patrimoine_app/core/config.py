@@ -40,3 +40,17 @@ BENCHMARKS = {
     "Nasdaq 100 (EQQQ.L)": "EQQQ.L",
     "EURO STOXX 50 (SX5E.DE)": "SX5E.DE",
 }
+
+
+# Épargne réglementée (plafonds indicatifs — à vérifier chaque année)
+LIVRET_PLAFONDS = {
+    "LA": 22950.0,   # Livret A
+    "LDDS": 12000.0,
+    "LEP": 10000.0,
+}
+LIVRET_LABELS = {
+    "LA": "Livret A",
+    "LDDS": "LDDS",
+    "LEP": "LEP",
+}
+ENV_COLORS["LIVRETS"] = "#a78bfa"

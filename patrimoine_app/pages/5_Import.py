@@ -17,6 +17,7 @@ from core.parsers import (
     extract_transaction_from_traderepublic,
     parse_csv_transactions,
     parse_liquidity_csv,
+    parse_livrets_csv,
 )
 from core.import_log import log_import_batch, load_journal, clear_journal, missing_price_alerts_from_open_df
 from core.db import (
@@ -102,7 +103,13 @@ with left:
             """
         )
 
+    st.markdown("### Livrets (A / LEP / LDDS)")
+    liv_csv = st.file_uploader("CSV livrets", type=["csv"], key="imp_liv_csv")
+    st.caption("Colonnes : date;livret;type;montant — livret=LA|LEP|LDDS · type=SOLDE|VERSEMENT|RETRAIT|INTERETS")
+    liv_mode = st.radio("Mode Livrets", ["Fusionner", "Remplacer"], horizontal=True, key="liv_mode")
+
     st.markdown("### CTO")
+
     cto_pdfs = st.file_uploader(
         "Trade Republic / CIC (PDF)", type=["pdf"], accept_multiple_files=True, key="imp_cto_pdf"
     )
@@ -292,6 +299,31 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
                 files=[getattr(pea_liq, "name", "liquidite.csv")],
                 inserted=ins, duplicates=sk, failed=0, mode=mode_flag(pea_mode),
                 extra=f"apports +{tot_ap:.2f} €",
+            )
+        except Exception:
+            pass
+
+    
+    # Livrets CSV
+    if liv_csv is not None:
+        liv_rows = parse_livrets_csv(liv_csv)
+        for r in liv_rows:
+            r["kind"] = "livret"
+        if liv_mode.startswith("Remplacer"):
+            from core.db import replace_enveloppe
+            n = replace_enveloppe(liv_rows, "LIVRETS")
+            ins, sk = n, 0
+            st.session_state["livrets_data"] = liv_rows
+        else:
+            ins, sk = persist_enveloppe(liv_rows, "LIVRETS", "merge")
+            st.session_state["livrets_data"] = list(st.session_state.get("livrets_data", [])) + liv_rows
+        n_ok += len(liv_rows)
+        log.append(f"Livrets CSV : {len(liv_rows)} lignes, {ins} insérées, {sk} doublons")
+        try:
+            log_import_batch(
+                enveloppe="LIVRETS", source="CSV",
+                files=[getattr(liv_csv, "name", "livrets.csv")],
+                inserted=ins, duplicates=sk, failed=0, mode=liv_mode,
             )
         except Exception:
             pass

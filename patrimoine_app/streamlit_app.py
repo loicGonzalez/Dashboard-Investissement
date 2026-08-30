@@ -22,6 +22,7 @@ if (
     or st.session_state.get("cto_files_data")
     or st.session_state.get("per_csv_data")
     or st.session_state.get("per_manual")
+    or st.session_state.get("livrets_data")
 ):
     rebuild_portfolios()
 
@@ -46,9 +47,9 @@ from core.portfolio import process_transactions, performance_periods, cash_sanit
 # Assure portefeuilles à jour
 has_data = any(
     st.session_state.get(k)
-    for k in ("pea_files_data", "pea_csv_data", "cto_files_data", "per_csv_data", "per_manual")
+    for k in ("pea_files_data", "pea_csv_data", "cto_files_data", "per_csv_data", "per_manual", "livrets_data")
 )
-if has_data and "pea" not in st.session_state:
+if has_data and ("pea" not in st.session_state or "livrets" not in st.session_state):
     rebuild_portfolios()
 
 pea = st.session_state.get("pea") or {"txs": [], "by_isin": {}, "df": pd.DataFrame()}
@@ -81,7 +82,12 @@ tot_apports = pea_m["apports"] + per_m["apports"] + cto_m["apports"]
 tot_valo = pea_m["valo_titres"] + per_m["valo_titres"] + cto_m["valo_titres"]
 tot_cash = pea_m["flow"]["cash"] + per_m["flow"]["cash"] + cto_m["flow"]["cash"]
 tot_fe = per_m["fe_valo"]
-tot_patrimoine = tot_valo + tot_cash + tot_fe
+liv_by = (st.session_state.get("livrets") or {}).get("by_code") or {}
+tot_livrets = sum(v.get("valo", 0) for v in liv_by.values())
+tot_livrets_apports = sum(v.get("apports", 0) for v in liv_by.values())
+tot_patrimoine = tot_valo + tot_cash + tot_fe + tot_livrets
+tot_apports = tot_apports + tot_livrets_apports
+
 tot_pv = tot_patrimoine - tot_apports
 tot_pct = 100 * tot_pv / tot_apports if tot_apports else 0.0
 tot_frais = pea_m.get("frais_achat", 0) + per_m.get("frais_achat", 0) + cto_m.get("frais_achat", 0)
@@ -265,17 +271,32 @@ def _env_card_data(name, m, open_df, fe_valo=0.0):
         "cash": m.get("flow", {}).get("cash", 0) or 0,
     }
 
+# Carte livrets (épargne sécurité)
+_liv_card = {
+    "name": "Livrets",
+    "valo": tot_livrets,
+    "pv_lat": sum(v.get("interets", 0) for v in liv_by.values()),
+    "pct_lat": 0.0,
+    "weight": (100 * tot_livrets / tot_patrimoine) if tot_patrimoine else 0.0,
+    "badge": "",
+    "badge_title": "Épargne réglementée",
+    "n_miss": 0,
+    "cash": 0,
+}
+
 cards = [
     _env_card_data("PEA", pea_m, pea_i.get("open")),
     _env_card_data("PER", per_m, per_i.get("open"), fe_valo=per_m.get("fe_valo", 0)),
     _env_card_data("CTO", cto_m, cto_i.get("open")),
+    _liv_card,
 ]
 page_map = {
     "PEA": "pages/2_PEA.py",
     "PER": "pages/3_PER.py",
     "CTO": "pages/4_CTO.py",
+    "Livrets": "pages/6_Livrets.py",
 }
-color_map = {"PEA": "#60a5fa", "PER": "#a78bfa", "CTO": "#34d399"}
+color_map = {"PEA": "#60a5fa", "PER": "#f59e0b", "CTO": "#34d399", "Livrets": "#a78bfa"}
 
 # ——— Objectif patrimoine ———
 from core.db import get_patrimoine_goal, save_patrimoine_goal, init_db as _init_goal_db

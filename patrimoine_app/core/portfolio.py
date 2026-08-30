@@ -425,3 +425,122 @@ def cash_sanity_check(flow: dict, tolerance: float = 1.0) -> dict | None:
             f"réimporte le CSV liquidité PEA (Import)."
         ),
     }
+
+
+def process_livrets(ops: list) -> dict:
+    """
+    isin = LA|LEP|LDDS
+    type = VERSEMENT|RETRAIT|INTERETS|SOLDE
+    Dernier SOLDE = base à sa date ; mouvements postérieurs s'y appliquent.
+    Sans SOLDE : valo = verse - retire + interets.
+    """
+    from core.config import LIVRET_LABELS, LIVRET_PLAFONDS
+    from datetime import datetime as _dt
+
+    codes = ("LA", "LEP", "LDDS")
+    buckets = {c: [] for c in codes}
+    for op in ops or []:
+        code = str(op.get("isin") or "").upper().strip()
+        if code in ("LIVRET A", "LIVRET_A", "LIVRETA"):
+            code = "LA"
+        if code in buckets:
+            buckets[code].append(op)
+
+    out = {}
+    for code in codes:
+        ops_c = sorted(buckets[code], key=lambda x: x.get("date") or _dt.min)
+        last_solde = None
+        last_solde_date = None
+        for op in ops_c:
+            if str(op.get("type", "")).upper() == "SOLDE":
+                try:
+                    last_solde = float(op.get("montant") or 0)
+                    last_solde_date = op.get("date")
+                except (TypeError, ValueError):
+                    pass
+
+        verse = retire = interets = 0.0
+        for op in ops_c:
+            typ = str(op.get("type", "")).upper()
+            if typ == "SOLDE":
+                continue
+            try:
+                m = float(op.get("montant") or 0)
+            except (TypeError, ValueError):
+                continue
+            if typ == "VERSEMENT":
+                verse += m
+            elif typ == "RETRAIT":
+                retire += m
+            elif typ in ("INTERETS", "INTERET"):
+                interets += m
+
+        if last_solde is not None:
+            delta = 0.0
+            for op in ops_c:
+                typ = str(op.get("type", "")).upper()
+                if typ == "SOLDE":
+                    continue
+                d = op.get("date")
+                if last_solde_date is not None and d is not None and d <= last_solde_date:
+                    continue
+                try:
+                    m = float(op.get("montant") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if typ == "VERSEMENT":
+                    delta += m
+                elif typ == "RETRAIT":
+                    delta -= m
+                elif typ in ("INTERETS", "INTERET"):
+                    delta += m
+            valo = last_solde + delta
+            # apports : solde de départ (hors intérêts déjà dans solde) + verse nets post
+            post_verse = post_retire = 0.0
+            for op in ops_c:
+                typ = str(op.get("type", "")).upper()
+                d = op.get("date")
+                if typ == "SOLDE":
+                    continue
+                if last_solde_date is not None and d is not None and d <= last_solde_date:
+                    continue
+                try:
+                    m = float(op.get("montant") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if typ == "VERSEMENT":
+                    post_verse += m
+                elif typ == "RETRAIT":
+                    post_retire += m
+            apports = last_solde + post_verse - post_retire
+            # intérêts post-solde ne sont pas des apports
+            for op in ops_c:
+                typ = str(op.get("type", "")).upper()
+                d = op.get("date")
+                if typ not in ("INTERETS", "INTERET"):
+                    continue
+                if last_solde_date is not None and d is not None and d <= last_solde_date:
+                    continue
+                try:
+                    apports -= float(op.get("montant") or 0)
+                except (TypeError, ValueError):
+                    pass
+            apports = max(0.0, apports)
+        else:
+            valo = verse - retire + interets
+            apports = verse - retire
+
+        plafond = LIVRET_PLAFONDS.get(code, 0.0)
+        out[code] = {
+            "name": LIVRET_LABELS.get(code, code),
+            "verse": round(verse, 2),
+            "retire": round(retire, 2),
+            "interets": round(interets, 2),
+            "apports": round(apports, 2),
+            "valo": round(valo, 2),
+            "plafond": plafond,
+            "pct_plafond": round(100 * valo / plafond, 1) if plafond else None,
+            "ops": ops_c,
+        }
+    return out
+
