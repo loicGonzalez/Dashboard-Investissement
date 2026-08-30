@@ -17,9 +17,9 @@ from core.portfolio import (
     build_history,
     build_summary,
 )
-from core.prices import get_current_prices, apply_price_fallbacks
+from core.prices import get_current_prices_smart, apply_price_fallbacks
 from core.db import (
-    init_db, load_operations, load_manual_prices,
+    init_db, load_operations, load_manual_prices, load_ticker_overrides,
     insert_operations, replace_enveloppe, save_manual_prices,
     count_operations, DB_PATH,
 )
@@ -33,6 +33,7 @@ def init_session():
         "per_csv_data": [],
         "per_manual": [],
         "pea_liquidity": [],
+        "ticker_overrides": {},
         "manual_prices": {},
         "histories": {},
         "pea_files_names": [],
@@ -81,6 +82,7 @@ def load_from_db():
     st.session_state["per_manual"] = [o for o in per if "Manuel" in str(o.get("source", ""))]
     st.session_state["cto_files_data"] = cto
     st.session_state["manual_prices"] = load_manual_prices()
+    st.session_state["ticker_overrides"] = load_ticker_overrides()
     st.session_state["histories"] = {}
     if pea or per or cto:
         rebuild_portfolios()
@@ -155,7 +157,7 @@ def enrich(by_isin):
             "sold": pd.DataFrame(),
         }
     isins = tuple(by_isin.keys())
-    prices = get_current_prices(isins)
+    prices = get_current_prices_smart(list(isins), by_isin)
     prices = apply_price_fallbacks(by_isin, prices, st.session_state.get("manual_prices", {}))
     summary = build_summary(by_isin, prices)
     if summary.empty:

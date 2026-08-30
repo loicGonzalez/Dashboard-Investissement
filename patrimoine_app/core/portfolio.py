@@ -236,12 +236,15 @@ def build_summary(by_isin, current_prices):
         plus_value = (valo - v["investi"]) if valo is not None else None
         pct_pv = (100 * plus_value / v["investi"]) if (plus_value is not None and v["investi"]) else None
 
+        src = (price_info or {}).get("ticker") or ""
+        warn = (price_info or {}).get("warning") or ""
         rows.append({
             "ISIN": isin,
             "Nom": v["name"],
             "Parts": v["parts"],
             "Investi (€)": round(v["investi"], 2),
             "Cours actuel (€)": round(price, 4) if price else None,
+            "Source cours": src + ((" ⚠" if warn else "")),
             "Valorisation (€)": round(valo, 2) if valo else None,
             "Plus-value (€)": round(plus_value, 2) if plus_value is not None else None,
             "Plus-value (%)": round(pct_pv, 1) if pct_pv is not None else None,

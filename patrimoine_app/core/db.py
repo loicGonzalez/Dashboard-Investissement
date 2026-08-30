@@ -36,7 +36,14 @@ CREATE TABLE IF NOT EXISTS cours_manuels (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ticker_overrides (
+    isin TEXT PRIMARY KEY,
+    tickers TEXT NOT NULL,
+    updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS meta (
+
     key TEXT PRIMARY KEY,
     value TEXT
 );
@@ -423,5 +430,49 @@ def delete_cash_operations(enveloppe: str, db_path: Path | None = None) -> int:
         )
         conn.commit()
         return cur.rowcount or 0
+    finally:
+        conn.close()
+
+
+def load_ticker_overrides(db_path: Path | None = None) -> dict:
+    """{ISIN: [ticker1, ticker2, ...]}"""
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("SELECT isin, tickers FROM ticker_overrides").fetchall()
+        out = {}
+        for r in rows:
+            raw = r["tickers"] or ""
+            tickers = [t.strip() for t in raw.replace(";", ",").split(",") if t.strip()]
+            if tickers:
+                out[str(r["isin"]).upper()] = tickers
+        return out
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        conn.close()
+
+
+def save_ticker_overrides(overrides: dict, db_path: Path | None = None) -> None:
+    """overrides: {ISIN: str 'T1,T2' ou list}"""
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM ticker_overrides")
+        for isin, val in (overrides or {}).items():
+            isin = str(isin).strip().upper()
+            if not isin:
+                continue
+            if isinstance(val, (list, tuple)):
+                tickers = ",".join(str(x).strip() for x in val if str(x).strip())
+            else:
+                tickers = str(val).replace(";", ",").strip()
+            if not tickers:
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO ticker_overrides (isin, tickers, updated_at) VALUES (?,?,?)",
+                (isin, tickers, datetime.utcnow().isoformat()),
+            )
+        conn.commit()
     finally:
         conn.close()

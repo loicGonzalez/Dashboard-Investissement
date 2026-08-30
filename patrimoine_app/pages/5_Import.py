@@ -28,6 +28,8 @@ from core.db import (
     backup_db_bytes,
     restore_db_from_bytes,
     delete_cash_operations,
+    load_ticker_overrides,
+    save_ticker_overrides,
 )
 
 st.set_page_config(page_title="Import — Patrimoine", page_icon="📥", layout="wide")
@@ -35,8 +37,20 @@ init_session()
 inject_css()
 render_sidebar(active="import")
 
-st.markdown("## 📥 Import")
-st.caption(f"Base locale : `{DB_PATH}` — les opérations survivent au redémarrage.")
+# Hero Import (style Finary)
+_counts_h = count_operations()
+_n_ops = sum(int(_counts_h.get(k, 0) or 0) for k in ("PEA", "PER", "CTO"))
+st.markdown(
+    '<div class="hero">'
+    '<div class="hero-label">Import</div>'
+    '<div class="hero-value" style="font-size:2rem;">Données &amp; synchronisation</div>'
+    '<div class="hero-meta">'
+    + f"Base locale · {_n_ops} opérations en DB · PEA {_counts_h.get('PEA', 0)} · "
+    + f"PER {_counts_h.get('PER', 0)} · CTO {_counts_h.get('CTO', 0)}"
+    + "</div></div>",
+    unsafe_allow_html=True,
+)
+st.caption(f"Fichier SQLite : `{DB_PATH}`")
 
 # État DB
 counts = count_operations()
@@ -565,6 +579,79 @@ try:
         st.caption("En Vue globale, la pondération suit la valorisation réelle de chaque enveloppe.")
 except Exception as e:
     st.warning(f"Cibles non disponibles : {e}")
+
+
+
+st.markdown("### Tickers Yahoo (ISIN → symbole)")
+st.caption(
+    "Priorité sur la table intégrée. Plusieurs symboles possibles, séparés par des virgules "
+    "(le premier qui répond est utilisé). Utile si un cours est à 0 ou erroné."
+)
+from core.config import YAHOO_TICKERS as _YT_DEFAULT
+if "ticker_overrides" not in st.session_state:
+    st.session_state["ticker_overrides"] = load_ticker_overrides()
+
+# Table éditable : union defaults + overrides
+_all_isins = sorted(set(list(_YT_DEFAULT.keys()) + list(st.session_state["ticker_overrides"].keys())))
+_rows_tk = []
+for _isin in _all_isins:
+    _ov = st.session_state["ticker_overrides"].get(_isin)
+    if _ov:
+        _tk = ", ".join(_ov) if isinstance(_ov, list) else str(_ov)
+        _src = "perso"
+    else:
+        _raw = _YT_DEFAULT.get(_isin, [])
+        _tk = ", ".join(_raw) if isinstance(_raw, list) else str(_raw)
+        _src = "défaut"
+    _rows_tk.append({"ISIN": _isin, "Tickers": _tk, "Source": _src})
+
+_edited = st.data_editor(
+    pd.DataFrame(_rows_tk) if _rows_tk else pd.DataFrame(columns=["ISIN", "Tickers", "Source"]),
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    key="ticker_editor",
+    column_config={
+        "ISIN": st.column_config.TextColumn("ISIN", width="medium"),
+        "Tickers": st.column_config.TextColumn("Tickers Yahoo (virgules)", width="large"),
+        "Source": st.column_config.TextColumn("Source", disabled=True, width="small"),
+    },
+)
+c_tk1, c_tk2, c_tk3 = st.columns(3)
+with c_tk1:
+    if st.button("Enregistrer les tickers", type="primary", key="save_tickers"):
+        _new = {}
+        for _, r in _edited.iterrows():
+            isin = str(r.get("ISIN") or "").strip().upper()
+            tk = str(r.get("Tickers") or "").strip()
+            if not isin or not tk:
+                continue
+            # Ne stocker que si différent du défaut ou isin nouveau
+            default = _YT_DEFAULT.get(isin)
+            default_s = ", ".join(default) if isinstance(default, list) else str(default or "")
+            if tk.replace(" ", "") != default_s.replace(" ", "") or isin not in _YT_DEFAULT:
+                _new[isin] = [x.strip() for x in tk.replace(";", ",").split(",") if x.strip()]
+        save_ticker_overrides(_new)
+        st.session_state["ticker_overrides"] = _new
+        # invalider cache cours
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        st.success(f"{len(_new)} override(s) enregistré(s)")
+        st.rerun()
+with c_tk2:
+    if st.button("Réinitialiser les overrides", key="reset_tickers"):
+        save_ticker_overrides({})
+        st.session_state["ticker_overrides"] = {}
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        st.success("Overrides effacés — table config par défaut")
+        st.rerun()
+with c_tk3:
+    st.caption("Après modification : les cours se recalculent au prochain affichage Vue globale / PEA.")
 
 
 st.markdown("### 💾 Sauvegarde base SQLite")
