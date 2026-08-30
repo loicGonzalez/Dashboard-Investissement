@@ -53,7 +53,16 @@ left, right = st.columns(2)
 with left:
     st.markdown("### PEA")
     pea_pdfs = st.file_uploader(
-        "Avis CIC (PDF)", type=["pdf"], accept_multiple_files=True, key="imp_pea_pdf"
+        "Avis PDF (CIC et/ou Trade Republic)",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="imp_pea_pdf",
+        help="Après transfert chez Trade Republic : dépose les confirmations d'investissement PEA. "
+             "Les anciens avis CIC restent valides pour l'historique.",
+    )
+    st.caption(
+        "Parseur **CIC** + **Trade Republic** (achat / vente / bonus / plan). "
+        "Conserve l'historique CIC : mode **Fusionner**."
     )
     pea_csv = st.file_uploader("CSV opérations PEA", type=["csv"], key="imp_pea_csv")
     pea_liq = st.file_uploader(
@@ -67,6 +76,17 @@ with left:
         horizontal=True,
         key="pea_mode",
     )
+    with st.expander("Transfert PEA → Trade Republic — comment importer ?", expanded=False):
+        st.markdown(
+            """
+1. **Ne clôture pas** le PEA CIC : demande un **transfert** vers TR.
+2. Garde tous les **PDF CIC** déjà importés (historique / PRU).
+3. Dès que TR envoie des **confirmations PEA**, importe-les ici (même zone PDF).
+4. Mode recommandé : **Fusionner** (anti-doublon).
+5. Les apports post-transfert : export **liquidité / cash** TR si disponible, sinon CSV manuel.
+6. Si un PDF TR ne passe pas : envoie un exemple pour enrichir le parseur.
+            """
+        )
 
     st.markdown("### CTO")
     cto_pdfs = st.file_uploader(
@@ -150,18 +170,28 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
     def mode_flag(label: str) -> str:
         return "replace" if label.startswith("Remplacer") else "merge"
 
-    # PEA PDF
+    # PEA PDF (CIC + Trade Republic)
     if pea_pdfs:
         pea_txs = []
         failed_names = []
         ok_names = []
+        n_tr = n_cic = 0
         for f in pea_pdfs:
             fname = getattr(f, "name", str(f))
-            tx = extract_transaction_from_pdf(f)
-            if tx is None:
-                tx = extract_transaction_from_traderepublic(f)
+            # Trade Republic en premier (docs TR), puis CIC
+            tx = extract_transaction_from_traderepublic(f)
+            if tx is not None:
+                n_tr += 1
+            else:
+                tx = extract_transaction_from_pdf(f)
+                if tx is not None:
+                    n_cic += 1
             if tx:
                 tx.setdefault("kind", "uc")
+                # Forcer enveloppe logique PEA si source TR sans tag
+                src = str(tx.get("source") or "")
+                if "Trade Republic" in src and "PEA" not in src:
+                    tx["source"] = "Trade Republic PEA"
                 pea_txs.append(tx)
                 n_ok += 1
                 ok_names.append(fname)
@@ -169,16 +199,23 @@ if st.button("🔄 Charger fichiers → session + SQLite", type="primary", use_c
                 n_fail += 1
                 failed_names.append(fname)
         mflag = mode_flag(pea_mode)
-        ins, sk = persist_enveloppe(pea_txs, "PEA", "merge")
-        st.session_state["pea_files_data"] = (
-            pea_txs if mflag == "replace"
-            else st.session_state.get("pea_files_data", []) + pea_txs
+        if mflag == "replace":
+            ins, sk = persist_enveloppe(pea_txs, "PEA", "replace")
+            st.session_state["pea_files_data"] = pea_txs
+        else:
+            ins, sk = persist_enveloppe(pea_txs, "PEA", "merge")
+            st.session_state["pea_files_data"] = (
+                st.session_state.get("pea_files_data", []) + pea_txs
+            )
+        log.append(
+            f"PEA PDF : {ins} insérées, {sk} doublons, {len(failed_names)} échecs "
+            f"(TR {n_tr} / CIC {n_cic})"
         )
-        log.append(f"PEA PDF : {ins} insérées, {sk} doublons, {len(failed_names)} échecs parse")
         log_import_batch(
-            enveloppe="PEA", source="PDF", files=ok_names + failed_names,
+            enveloppe="PEA", source="PDF CIC+TR", files=ok_names + failed_names,
             inserted=ins, duplicates=sk, failed=len(failed_names),
             failed_files=failed_names, mode=mflag,
+            extra=f"TR={n_tr} CIC={n_cic}",
         )
 
     # PEA CSV opérations titres

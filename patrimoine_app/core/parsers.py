@@ -96,16 +96,24 @@ def extract_transaction_from_pdf(pdf_file):
 # ─────────────────────────────────────────────
 
 def extract_transaction_from_traderepublic(pdf_file):
+    """Parse avis Trade Republic (CTO ou PEA) : achat, vente, bonus, plan."""
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            text = pdf.pages[0].extract_text() or ""
+            parts = []
+            for page in pdf.pages[:3]:
+                parts.append(page.extract_text() or "")
+            text = "\n".join(parts)
     except Exception:
         return None
 
-    if "TRADE REPUBLIC" not in text.upper() and "CONFIRMATION DE L'INVESTISSEMENT" not in text.upper():
-        # Autoriser aussi les documents BONUS
-        if "BONUS" not in text.upper():
-            return None
+    text_up0 = text.upper()
+    if not any(k in text_up0 for k in (
+        "TRADE REPUBLIC",
+        "CONFIRMATION DE L'INVESTISSEMENT",
+        "CONFIRMATION DE LA VENTE",
+        "BONUS",
+    )):
+        return None
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     text_up = text.upper()
@@ -272,9 +280,21 @@ def extract_transaction_from_traderepublic(pdf_file):
     else:
         return None
 
+    # Type ACHAT / VENTE
+    typ = "ACHAT"
+    if any(k in text_up for k in ("CONFIRMATION DE LA VENTE", "ORDRE DE VENTE", "VENTE DE", " SELL ")):
+        typ = "VENTE"
+    elif "VENTE" in text_up and "ACHAT" not in text_up and "INVESTISSEMENT" not in text_up:
+        typ = "VENTE"
+
+    # Enveloppe (PEA vs CTO) — purement informatif dans source
+    env_tag = "PEA" if "PEA" in text_up else "CTO"
+    if "PLAN D'INVESTISSEMENT" in text_up or "PLAN D’INVESTISSEMENT" in text_up or "SAVINGS PLAN" in text_up:
+        env_tag = env_tag + " plan"
+
     return {
         "date": date,
-        "type": "ACHAT",
+        "type": typ,
         "quantite": quantite,
         "valeur": nom or isin,
         "isin": isin,
@@ -283,8 +303,9 @@ def extract_transaction_from_traderepublic(pdf_file):
         "brut": montant_brut,
         "frais": ttf,
         "montant": montant,
-        "source": "Trade Republic",
+        "source": f"Trade Republic {env_tag}",
         "kind": "uc",
+        "no_cash": False,
     }
 
 def parse_csv_transactions(uploaded_file) -> list:
