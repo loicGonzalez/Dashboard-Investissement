@@ -559,9 +559,9 @@ def parse_liquidity_csv(uploaded_file) -> list:
 def parse_livrets_csv(uploaded_file) -> list:
     """
     CSV épargne réglementée.
-    Colonnes : date;livret;type;montant
-      livret = LA | LEP | LDDS (ou libellés)
-      type = VERSEMENT | RETRAIT | INTERETS | SOLDE
+    Colonnes souples : date, livret, type, montant (ex. "Montant (€)").
+    livret = LA | LEP | LDDS | "Livret A"
+    type = SOLDE | VERSEMENT | RETRAIT | INTERETS
     """
     try:
         df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="utf-8-sig")
@@ -573,13 +573,25 @@ def parse_livrets_csv(uploaded_file) -> list:
             uploaded_file.seek(0)
             df = pd.read_csv(uploaded_file, sep=",", encoding="utf-8")
 
-    df.columns = [str(c).replace("\ufeff", "").strip().lower() for c in df.columns]
+    def _norm_col(c):
+        s = str(c).replace("\ufeff", "").strip().lower()
+        # "montant (€)" -> "montant"
+        s = re.sub(r"\s*\([^)]*\)\s*", "", s)
+        s = s.replace("é", "e").replace("è", "e").replace("ê", "e")
+        s = re.sub(r"[^a-z0-9_]+", "_", s).strip("_")
+        return s
+
+    df.columns = [_norm_col(c) for c in df.columns]
     rename = {}
-    for c in df.columns:
-        if c in ("code", "type_livret", "produit", "compte"):
+    for c in list(df.columns):
+        if c in ("code", "type_livret", "produit", "compte", "livret_a"):
             rename[c] = "livret"
-        if c in ("montant_eur", "amount", "valeur"):
+        if c in ("montant_eur", "amount", "valeur", "montant_e", "montant_eur_"):
             rename[c] = "montant"
+        if c.startswith("montant"):
+            rename[c] = "montant"
+        if c in ("libelle", "label"):
+            rename[c] = "livret"
     if rename:
         df = df.rename(columns=rename)
 
@@ -589,7 +601,7 @@ def parse_livrets_csv(uploaded_file) -> list:
 
     def norm_livret(x):
         u = str(x or "").upper().strip()
-        if u in ("LA", "A", "LIVRET A", "LIVRET_A", "LIVRETA"):
+        if u in ("LA", "A", "LIVRET A", "LIVRET_A", "LIVRETA") or u.startswith("LIVRET A"):
             return "LA"
         if "LDDS" in u or u == "DD":
             return "LDDS"
@@ -617,7 +629,7 @@ def parse_livrets_csv(uploaded_file) -> list:
                 date = None
                 for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
                     try:
-                        date = datetime.strptime(date_val.strip()[:10], fmt)
+                        date = datetime.strptime(str(date_val).strip()[:10], fmt)
                         break
                     except ValueError:
                         continue
@@ -634,6 +646,9 @@ def parse_livrets_csv(uploaded_file) -> list:
             if montant is None or montant < 0:
                 continue
             from core.config import LIVRET_LABELS
+            src = "CSV livrets"
+            if "source" in df.columns and pd.notna(row.get("source")):
+                src = str(row.get("source")).strip() or src
             txs.append({
                 "date": date,
                 "type": typ,
@@ -644,11 +659,12 @@ def parse_livrets_csv(uploaded_file) -> list:
                 "solde": montant if typ == "SOLDE" else None,
                 "brut": None,
                 "frais": 0.0,
-                "montant": round(montant, 2),
-                "source": "CSV livrets",
+                "montant": round(float(montant), 2),
+                "source": src,
                 "kind": "livret",
                 "no_cash": False,
             })
         except Exception:
             continue
     return txs
+
